@@ -1,0 +1,219 @@
+# ============================================
+# ====  Parameters for Basic Information  ====
+# ============================================
+
+data_dir: /data/raspy/                          # path to data pool.
+model_dir: /data/raspy/trained_models/          # path to store trained models.
+h5_dir: /data/raspy/preprocessed_data/          # path to store preprocessed data.
+model_arch_dir: ./EEGNet.py
+config_dir: ./config.yaml
+data_names:
+  - 2023-06-30_XU_OL_1
+  # - 2023-06-30_XU_OL_2
+  # # - 2023-06-16_XU_CL_1_LeftRight
+  # - 2023-07-12_Xu_OL_1
+  # - 2023-07-12_Xu_OL_2
+  # - 2023-07-12_Xu_OL_3
+  # - 2023-07-12_Xu_OL_4
+  # # - 2023-05-12_XU_OL_1_LeftRight
+  # - 2022-12-17_XUYAN_OL_1_AM
+  # - 2022-12-05_XUYAN_OL_1
+train_on_server: True                           # if set to False, please change data_dir, model_dir, h5_dir correspondingly to your local paths.
+random_seed: ~
+
+# ============================================
+# ======  Parameters for Preprocessing  ======
+# ============================================
+
+data_preprocessor:
+  eeg_cap_type: gel64               # from 'gel64', 'dry64', or 'saline64'.
+  sampling_frequency: 1000          # sampling frequency. Data recorded with ANT EEGO is 1000 Hz by default.
+  ch_to_drop:                       # channel names we want to drop.
+    - TRGR
+    - COUNT
+    - F7
+    - F5
+    - F3
+    - F1
+    - Fz
+    - F2
+    - F4
+    - F6
+    - F8
+    - Fp1
+    - Fpz
+    - Fp2
+    - AF7
+    - AF3
+    - AF4
+    - AF8
+    - EOG
+  bandpass_filter:
+    apply: False                    # whether bandpass filter is needed.
+    lowcut: 4                       # the low pass band.
+    highcut: 40                     # the high pass band.
+    order: 5                        # the order of the filter.
+
+dataset_generator:
+  dataset_operation:                # see usage examples below
+    concatenate: True
+    selected_labels:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+    mapped_labels:
+      class0:
+        - 2
+        - ~
+      class1:
+        - 3
+        - 3
+      # class2:
+      # #   - 3
+      # #   - ~
+      # class3:
+      # #   - 4
+      # #   - ~
+      # class4:
+      #   - 
+  first_ms_to_drop: 1000                      # time in ms dropped from each trial which has less useful information at the beginning.
+  window_length: &window_length_ 1000         # the time window in ms of data in each step during training. This is used to remove trials that are too short.
+  omit_angles: 10
+
+partition:
+  num_folds: &num_folds_ 5                    # the number of fold in k-fold validation.
+
+augmentation:
+  window_length: *window_length_              # the time window of data in each step during training.
+  stride: 100                                 # the stride of the window to slide.
+  new_sampling_frequency: &new_s_f_ 100       # the sampling frequency to downsample to for 1s data.
+  num_noise: 4                                # the number of noise windows to add to one original data window.
+
+# ============================================
+# ========  Parameters for Training   ========
+# ============================================
+
+training:
+  num_folds: *num_folds_
+
+  max_epochs: 2
+  patience: 100
+  mode: max
+  save_top_k: 10
+  save_last: true
+
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  eps: 0.001
+  loss_func: CEL
+
+  # for dataloader
+  train_batch_size: 32
+  train_shuffle: True
+  train_drop_last: False
+  train_num_workers: 10
+  train_prefetch_factor: 4
+  val_batch_size: 32
+  val_shuffle: True
+  val_drop_last: False
+  val_num_workers: 10
+  val_prefetch_factor: 4
+
+# ============================================
+# =========  Parameters for EEGNet  ==========
+# ============================================
+
+model:
+  num_temporal_filters: 8
+  num_spatial_filters: 2
+  window_length: *window_length_
+  sampling_frequency: *new_s_f_
+
+  block1:
+    # Conv2D layer
+    conv: [1,50]
+    # DepthwiseConv2D layer
+    max_norm_value: 1
+    eps: 0.01
+    # AveragePool2D layer
+    avg_pool: [1,3]
+    # Dropout layer
+    dropout: 0.5
+
+  block2:
+    # SeparableConv2D
+    sep_conv: [1,16]                   # set to 8 if window_length < 1000
+    # AveragePool2D layer
+    avg_pool: [1,16]                   # set to 4 if window_length < 1000; 1 if < 500.
+    # Dropout layer
+    dropout: 0.5
+    # Dense
+    max_norm_value: 0.25
+    eps: 0.01
+
+
+
+
+
+# ========== Notes ==========
+# label map of ALS:
+#   0 : left
+#   1 : right
+#   2 : Still
+#   3 : Sing
+#   4 : Subtract
+#   5 : Navigate
+
+# label map of healthy:
+#   0 : left
+#   1 : right
+#   2 : up
+#   3 : down
+#   4 : center
+# ===========================
+
+
+# ========== Notes ==========
+# Parameters
+# ----------
+# data_names: list
+#   Put the data names here. Each data is an element.
+# operation: dict
+#   Indicate what you want to do with these data.
+#   concatenate: bool
+#     If True, no label needs to be adjusted. Follow the original labels in data and do classification. For multiple data inputs, combine data with the same label.
+#     If False, adjust labels based on what assigned here.
+#   reassign_dict: dict
+#     Assign the data with its original label to each class from each data folder. Each class is a list of the original labels from each data.
+#     If the data folder has nothing to contribute to this class, mark as -2.
+#     See examples.
+#   Example 1: Train on two data with same labels to have more data: (left:0, right:1), (left:0, right:1)
+#     combine: True
+#     reassign_dict: anything (the script won't check as long as combine is True)
+#   Example 2: Train on two data, each of which contains part of data: (left:0, right:1), (sing:3, subtract:4)
+#     combine: False
+#     reassign_dict:
+#       class0:
+#         - 0
+#         - -2
+#       class1:
+#         - 1
+#         - -2
+#       class2:
+#         - -2
+#         - 3
+#       class3:
+#         - -2
+#         - 4
+#   Example 3: Train on two data, each of which contains same labels, but here we want to treat them as different classes: (left:0, right:1), (left:0, right:1)
+#     combine: False
+#     reassign_dict:
+#       class0:
+#         - 0
+#         - -2
+#       class1:
+#         - -2
+#         - 0
+# ===========================
