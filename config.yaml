@@ -6,7 +6,7 @@ data_dir: /data/raspy/                          # path to data pool.
 model_dir: /data/raspy/trained_models/          # path to store trained models.
 h5_dir: /data/raspy/preprocessed_data/          # path to store preprocessed data.
 model_arch_dir: ./EEGNet.py
-config_dir: ./config.yaml
+config_dir: ./shared_utils/config.yaml
 data_names:
   - 2023-06-30_XU_OL_1
   # - 2023-06-30_XU_OL_2
