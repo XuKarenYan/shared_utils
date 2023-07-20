@@ -30,11 +30,7 @@ data_preprocessor:
     - AF8
     - EOG
   bandpass_filter:
-<<<<<<< HEAD
-    apply: True                    # whether bandpass filter is needed.
-=======
-    apply: False                    # whether bandpass filter is needed.
->>>>>>> 560492032b22dc7ef6f0d484b3997a263227b2fb
+    apply: True                     # whether bandpass filter is needed.
     lowcut: 4                       # the low pass band.
     highcut: 40                     # the high pass band.
     order: 5                        # the order of the filter.
