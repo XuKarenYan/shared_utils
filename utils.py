@@ -117,9 +117,9 @@ def read_data_file_to_dict(filename, return_dict=True):
     If return dict and it's eeg data:
         eeg_data: dict
             'eegbuffersignal': 2-d array with shape (n_samples, n_electrodes)
-                Raw data collected with sampling rate as 1000 Hz.
+                Raw data collected with sampling rate as 1000 Hz. Already applied bandpass filter: 4 - 90 Hz.
             'databuffer': 2-d array with shape (n_samples, n_electrodes)
-                Filtered raw data with sampling rate as 1000 Hz. Already applied bandpass filter: 4 - 90 Hz.
+                Filtered raw data with sampling rate as 1000 Hz. Already applied bandpass filter: 4 - 40 Hz.
             'task_step': 1-d array with shape (n_samples,)
                 Record the sample indices in the task data that each eeg data corresponds to. Each element is a number in [0, n_task_samples].
                 E.g.: (array([  252,   253,   255, ..., 75038, 75039, 75040], dtype=int32), array([ 2, 15, 43, ..., 20, 21, 20]))
