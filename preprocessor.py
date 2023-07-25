@@ -2,8 +2,6 @@ import numpy as np
 from scipy.signal import butter, resample
 from scipy import signal
 
-#PICK UP WORK HERE GOTTA PULL RESAMPLE IN AS PART OF PREPROCESSING FOR RASPY
-
 class DataPreprocessor:
     '''This preprocessor handles the general preprocessing work, including dropping channels, several filtering, and normalization.
 
@@ -20,6 +18,9 @@ class DataPreprocessor:
         ----------
         config: dict
             Configurations from the yaml file.
+
+        self.first_run is used to flag that the preprocess function has not yet 
+        been run for online experiments.
         '''
 
         self.eeg_cap_type = config['eeg_cap_type']
@@ -29,6 +30,9 @@ class DataPreprocessor:
         self.highcut = config['bandpass_filter']['highcut']
         self.order = config['bandpass_filter']['order']
         self.sf = config['sampling_frequency']
+        self.online_status = config['online_status']
+        self.normalizer_type = config['normalizer_type']
+        self.first_run = True
 
     def get_electrode_position(self):
         '''Get electrode names and grid coordinates for different cap types.
@@ -177,7 +181,10 @@ class DataPreprocessor:
         return data @ laplacian_next.T
 
     def normalize_channels(self, data):
-        '''Normalize each channel to have mean 0 and variance 1.
+        '''Normalize each channel to have mean 0 and standard deviation 1.
+
+        Used during offline function, utilizes mean and standard deviation of 
+        entire dataset at once.
 
         Parameters
         ----------
@@ -192,8 +199,21 @@ class DataPreprocessor:
         
         return data
 
-    def preprocess(self, data, online=False):
-        #PICK UP WORK HERE NEED TO IMPLEMENT ONLINE VERSION OF PREPROCESSING, ADD WELFORDS AND RUNNING MEAN
+    def test_if_buffer_not_filled(self, data):
+        '''This function checks to see if any of the timesteps in the data it 
+        has been passed are all 0s. If so, streaming has just started and this sample
+        should not be preprocessed because the buffer has not yet accumulated 
+        enough data. Just pass through all data unaltered.
+        
+        This function is intended to be used as part of closed loop preprocessing.'''
+        
+        #Test if any ticks contain all 0s, indicating buffers still filling
+        if np.any(np.all(data==0, axis=0)):
+            return True
+        else:
+            return False
+
+    def preprocess(self, data):
         '''Manage the whole preprocessing procedure.
 
         Parameters
@@ -206,7 +226,7 @@ class DataPreprocessor:
         data: 2-d array with shape (n_samples, n_electrodes)
         '''
 
-        # Throw channels
+        # Throw out channels we don't want
         ch_names, _ = self.get_electrode_position()
         ch_index_to_drop = [ch_names.index(ch) for ch in self.ch_to_drop]
         data = np.delete(data, ch_index_to_drop, axis=1)
@@ -217,15 +237,32 @@ class DataPreprocessor:
         data = self.laplacian_filtering(data)       # laplacian filter
 
         # Normalize channels
-        data = self.normalize_channels(data)
+        #If running offline, utilize mean and std dev of all data to normalize
+        if self.online_status == 'offline':
+            data = self.normalize_channels(data)
+        #If online, normalize with data collected up to this point in time
+        if self.online_status == 'online':
+            #Check if data buffer not yet filled. If not, return data unaltered
+            if self.test_if_buffer_not_filled(data):
+                return data
+            
+            #Instantiate normalization object if needed
+            if self.first_run:
+                if self.normalizer_type == 'welfords':
+                    self.normalizer = Welfords(data)
+                if self.normalizer_type == 'running_mean':
+                    self.normalizer = Running_Mean(data)
+                self.first_run == False
+            else:
+                self.normalizer(data)
+            #Normalize this sample
+            data = ((data-normalizer.mean) / normalizer.std)
 
         return data
 
-    def test_if_streaming_data(self, data):
-        '''This function checks to see if any of the timesteps in the data it 
-        has been passed are all 0s. If so, streaming has just started and PICK UP WORK HERE 
-        
-        This function is intended to be used as part of closed loop preprocessing.'''
+    def preprocess_like_closed_loop(self, data):
+
+
 
 class Welfords:
     """

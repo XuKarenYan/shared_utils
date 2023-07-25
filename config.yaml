@@ -6,6 +6,7 @@ data_dir: /data/raspy/                          # path to data pool.
 model_dir: /data/raspy/trained_models/          # path to store trained models.
 h5_dir: /data/raspy/preprocessed_data/          # path to store preprocessed data.
 model_arch_dir: ./EEGNet.py
+online_status: offline                          # offline or online functionality
 config_dir: ./config.yaml
 data_names:
   - 2023-06-30_XU_OL_1
@@ -39,6 +40,7 @@ data_preprocessor:
     - AF4
     - AF8
     - EOG
+  normalizer_type: welfords         # If online experiment can be welfords or running_mean. Offline experiment_type ignores this setting
   bandpass_filter:
     apply: False                    # whether bandpass filter is needed.
     lowcut: 4                       # the low pass band.
@@ -54,7 +56,7 @@ dataset_generator:
       - 2
       - 3
       - 4
-    mapped_labels:
+    mapped_labels:                  # pick up work here: explain how these work, what are these settings?
       class0:
         - 2
         - ~
@@ -81,6 +83,15 @@ augmentation:
   stride: 100                                 # the stride of the window to slide.
   new_sampling_frequency: &new_s_f_ 100       # the sampling frequency to downsample to for 1s data.
   num_noise: 4                                # the number of noise windows to add to one original data window.
+
+
+# ============================================
+# ========  Parameters for Raspy    ==========
+# ============================================
+
+#PICK UP WORK HERE NEED TO UNIFY WITH RASPY CONFIG FILE 
+
+
 
 # ============================================
 # ========  Parameters for Training   ========
