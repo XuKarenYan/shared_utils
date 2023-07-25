@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 from scipy.signal import butter, resample
 from scipy import signal
@@ -16,22 +17,23 @@ import pandas as pd
 
 
 
-def model_namer(sql_conn, train_on_server, table='EEGNet'):
+def model_namer(sql_conn, train_on_server, model_arch_name):
     '''Generates a unique two word name based on the inbuilt unix dictionary. 
     
     Parameters
     ----------
     sql_conn: sqlite3.Connection
     train_on_server: bool
-    table: string
-        Name of the model structure.
+    model_arch_name: string
+        Name of the model architecture.
 
     Returns
     -------
     new_name: string
-        Generated two-word model name.
+        Generated two-word model name with model architecture's name, e.g. wooden_jazz_EEGNet.
     '''
-    
+
+    table = 'EEGNet'
     # get previously used names
     if train_on_server == True:
         used_names = pd.read_sql(f'SELECT * FROM {table}', sql_conn)
@@ -46,7 +48,7 @@ def model_namer(sql_conn, train_on_server, table='EEGNet'):
         unique_name = False
         while not unique_name:
             new_name = random.choice(words) + '_' + random.choice(words)
-            new_name = new_name + '_' + table
+            new_name = new_name + '_' + model_arch_name
             if new_name not in used_names:
                 unique_name = True
     else:                                                                   # cannot check duplicate names for local training
@@ -522,8 +524,8 @@ class DatasetGenerator:
         -------
         all_trials: list of arrays with shape (n_electrodes, n_samples, 1)
             Stores all trials from all data we want to use.
-        all_labels: list of ints
-            Stores reassigned labels.
+        all_labels: list of tuples, with first element an int and second an array
+            Stores reassigned labels for each trial and every tick in this trial.
         all_kinds: list of string
             Stores the kind of each trial.
         output_dim: int
@@ -549,7 +551,7 @@ def partition_data(labels, num_folds):
     Parameters
     ----------
     labels: list of tuples
-        The labels of each trial.
+        The labels of each trial and every tick in this trial.
     num_folds: int
         The number of folds we use for k-fold validation.
 
@@ -582,7 +584,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
     Parameters
     ----------
     trials: list of arrays with shape (n_electrodes, n_samples, 1)
-    labels: list of ints
+    labels: list of tuples
     ids_folds: list of list
         It contains num_folds sublist. Each sublist contains the indices of each fold, the number of which is around 1 / num_folds.
     h5_file: str
@@ -733,3 +735,23 @@ def generateLabelWithRotation(task, omitAngles=10):
     label1ms = np.array(label1ms)
 
     return label1ms
+
+
+
+if __name__ == "__main__":
+    yaml_file = sys.argv[1]
+    config = read_config(yaml_file)
+
+    # Preprocess a dataset
+    preprocessor = DataPreprocessor(config['data_preprocessor'])
+    eeg_data['databuffer'] = preprocessor.preprocess(eeg_data['databuffer'])
+
+    # Generate a dataset
+    dataset_generator = DatasetGenerator(config['dataset_generator'])
+    trials, labels, kinds, output_dim = dataset_generator.generate_dataset(data_dicts)
+
+    # Partition data
+    ids_folds = partition_data(labels, config['partition']['num_folds'])
+
+    # Augment a dataset
+    augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config['augmentation'])
