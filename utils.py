@@ -541,6 +541,35 @@ class DatasetGenerator:
             all_labels.extend(labels)
             all_kinds.extend(kinds)
         output_dim = len(set([label[0] for label in all_labels]))
+
+        # cp = int(len(all_trials) / 2)
+        # mapped_labels = {'class0': [0, None], 'class1': [None, 0]}              # TODO
+        # data_dicts = [(all_trials[:cp], all_labels[:cp], all_kinds[:cp]), (all_trials[cp:], all_labels[cp:], all_kinds[cp:])]
+        # all_trials, all_labels = [], []
+        # for i, (trials, labels, kinds) in enumerate(data_dicts):
+        #     # preprocess
+        #     length = [t.shape[1] for t in trials]
+        #     inds = [0] + [sum(length[:x+1]) for x in range(len(length))]
+        #     big = np.concatenate(trials, axis=1)
+
+        #     mean = big.mean(axis=1, keepdims=True)
+        #     std = big.std(axis=1, keepdims=True)
+        #     big = (big - mean) / std
+            
+        #     trials = []
+        #     for j in range(len(inds)-1):
+        #         a = big[:, inds[j]:inds[j+1], :]
+        #         trials.append(a)
+
+        #     # relabel
+        #     mapping = {k: v[i] for k, v in mapped_labels.items()}
+        #     filtered_trials = [trial for trial, label in zip(trials, labels) if label[0] in mapping.values()]
+        #     all_trials.extend(filtered_trials)
+        #     mapping = {v: int(k[-1]) for k, v in mapping.items()}
+        #     filtered_labels = [(mapping[label[0]], label[1]) for label in labels if label[0] in mapping]                                        # change the label of each trial
+        #     filtered_labels = [(trial_labels[0], [mapping.get(label, -1) for label in trial_labels[1]]) for trial_labels in filtered_labels]    # change the label of each sample for each trial
+        #     all_labels.extend(filtered_labels)
+
         return all_trials, all_labels, all_kinds, output_dim
 
 
@@ -635,7 +664,6 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                 trial_window = trial[:, window_start:window_end, :]
                 label_window = label[1][window_start:window_end]
 
-                # new_label = label[0]
                 if kind == 'OL':
                     new_label = label[0]
                 else:
