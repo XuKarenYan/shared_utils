@@ -260,8 +260,6 @@ class DataPreprocessor:
 
         return data
 
-    def preprocess_like_closed_loop(self, data):
-
 
 
 class Welfords:

@@ -6,8 +6,7 @@ data_dir: /data/raspy/                          # path to data pool.
 model_dir: /data/raspy/trained_models/          # path to store trained models.
 h5_dir: /data/raspy/preprocessed_data/          # path to store preprocessed data.
 model_arch_dir: ./EEGNet.py
-online_status: offline                          # offline or online functionality
-config_dir: ./config.yaml
+config_dir: ./shared_utils/config.yaml
 data_names:
   - 2023-06-30_XU_OL_1
 train_on_server: True                           # if set to False, please change data_dir, model_dir, h5_dir correspondingly to your local paths.
@@ -46,6 +45,7 @@ data_preprocessor:
     lowcut: 4                       # the low pass band.
     highcut: 40                     # the high pass band.
     order: 5                        # the order of the filter.
+  online_status: offline                          # offline or online functionality
 
 labeling:
   labels_to_keep:
@@ -110,7 +110,7 @@ augmentation:
 training:
   num_folds: *num_folds_
 
-  max_epochs: 2
+  max_epochs: 100
   patience: 100
   mode: max
   save_top_k: 10

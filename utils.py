@@ -244,10 +244,10 @@ def augment_data_to_file(trials,
     (n_trials, n_electrodes, n_samples, 1) and (n_trials,), respectively.
     '''
 
-    window_length = config['window_length']
-    stride = config['stride']
-    new_samp_freq = config['new_sampling_frequency']
-    num_noise = config['num_noise']
+    window_length = config['augmentation']['window_length']
+    stride = config['augmentation']['stride']
+    new_samp_freq = config['augmentation']['new_sampling_frequency']
+    num_noise = config['augmentation']['num_noise']
     detect_artifacts = config['artifact_handling']['detect_artifacts']
     reject_std = config['artifact_handling']['reject_std']
 
@@ -299,7 +299,7 @@ def augment_data_to_file(trials,
                 #If detecting artifacts, skip this window if artifact detected
                 if detect_artifacts:
                     #Reshape data to [samples, electrodes] for artifact detection
-                    if detect_artifact(np.reshape(trial_window, [window_size, n_electrodes]), 
+                    if detect_artifact(np.reshape(trial_window, [window_length, n_electrodes]), 
                                        reject_std):
                         artifacts_detected += 1
                         window_start += stride
