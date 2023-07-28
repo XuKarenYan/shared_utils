@@ -1,7 +1,44 @@
-from utils import data_file_to_dict
+from utils import data_file_to_dict, read_config
 from preprocessor import DataPreprocessor
 import numpy as np
 from scipy.signal import resample
+
+class PreprocessLikeClosedLoop:
+    '''This class handles takes one or more data files and transforms them into 
+    a shape where a model can evaluate them like raspy does, i.e., tick by tick.
+
+    Uses a dictionary of configuration settings which is generally intended to 
+    be created from a yaml file.
+
+    Example
+    -------
+    preprocessor = PreprocessLikeClosedLoop(config_dict)
+    eeg_trials, eeg_trial_labels = preprocessor.preprocess(eeg_data, task_data)
+    '''
+
+    def __init__(self, config):
+        '''Initializes DataPreprocessor with given arguments from the config file.
+
+        Parameters
+        ----------
+        config: dict
+            Configurations from the yaml file.
+
+        self.first_run is used to flag that the preprocess function has not yet 
+        been run for online experiments.
+        '''
+
+        self.eeg_cap_type = config['eeg_cap_type']
+        self.ch_to_drop = config['ch_to_drop']
+        self.labels_to_keep = config['labeling']['labels_to_keep']
+        self.relabel_pairs = config['labeling']['relabel_pairs']
+        
+        self.sf = config['sampling_frequency']
+        self.online_status = config['online_status']
+        self.normalizer_type = config['normalizer_type']
+        self.first_run = True
+
+
 
 def preprocess_like_closed_loop(data_name, 
                                 eeg_cap_type='gel64',

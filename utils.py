@@ -283,16 +283,6 @@ def augment_data_to_file(trials,
             while (window_end <= n_samples):
                 trial_window = trial[:, window_start:window_end, :]
                 label_window = label[1][window_start:window_end]
-
-                #If detecting artifacts, skip this window if artifact detected
-                if detect_artifacts:
-                    #Reshape data to [samples, electrodes] for artifact detection
-                    if detect_artifact(np.reshape(trial_window, [window_size, n_electrodes]), 
-                                       reject_std):
-                        artifacts_detected += 1
-                        window_start += stride
-                        window_end += stride
-                        continue
                 
                 # new_label = label[0]
                 if kind == 'OL':
@@ -305,6 +295,17 @@ def augment_data_to_file(trials,
                         window_start += stride
                         window_end += stride
                         continue
+                
+                #If detecting artifacts, skip this window if artifact detected
+                if detect_artifacts:
+                    #Reshape data to [samples, electrodes] for artifact detection
+                    if detect_artifact(np.reshape(trial_window, [window_size, n_electrodes]), 
+                                       reject_std):
+                        artifacts_detected += 1
+                        window_start += stride
+                        window_end += stride
+                        continue
+                
                 dist.append(new_label)
 
                 # save the original data of this window
@@ -325,7 +326,7 @@ def augment_data_to_file(trials,
         val_trials = file.create_dataset(str(fold)+'_val_trials', data=dataset1[::5])
         val_labels = file.create_dataset(str(fold)+'_val_labels', data=dataset2[::5])
         label_distribution = np.unique(dist, return_counts=True)
-        artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1))
+        artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1) + artifacts_detected)
 
         print(f'Label distribution in fold {fold}:')
         print(np.unique(dist,return_counts=True))
