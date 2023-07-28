@@ -40,12 +40,22 @@ data_preprocessor:
     - AF4
     - AF8
     - EOG
-  normalizer_type: welfords         # If online experiment can be welfords or running_mean. Offline experiment_type ignores this setting
+  normalizer_type: welfords         # If online experiment can be welfords or running_mean. If experiment_type is 'Offline', ignores this setting
   bandpass_filter:
     apply: False                    # whether bandpass filter is needed.
     lowcut: 4                       # the low pass band.
     highcut: 40                     # the high pass band.
     order: 5                        # the order of the filter.
+
+labeling:
+  labels_to_keep:
+    - all
+  relabel_pairs:                    # used to simulate when tasks are remapped during closed loop experiments. For instance, in a closed loop experiment if the mental math task was used to move the cursor right in bci_raspy settings the label for that task in the closed loop data would be a 1 (the usual label for left), while in the training data it would be a 4 (the usual label for math). To correct for this, pass 1, 4 into relabel pairs, so that task labels of 1 in the test dataset will be reassigned to be 4 (to match the corresponding training data).
+    - ~                             
+
+artifact_handling:
+  detect_artifacts: True            # Whether to detect and discard artifacts
+  reject_std: 5.5                   # number of standard deviations to allow each channel to vary by. If any data points in a window exceed this threshold, the window will be marked as containing an artifact.
 
 dataset_generator:
   dataset_operation:                # see usage examples below

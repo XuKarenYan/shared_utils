@@ -217,19 +217,26 @@ def partition_data(labels, num_folds):
 
 
 
-def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TODO
+def augment_data_to_file(trials, 
+                         labels, 
+                         kinds,
+                         ids_folds, 
+                         h5_file, 
+                         config):#TODO
     '''For each fold of data, augment the data to a 5x large dataset by adding 4 separate noises to each data window. Store the downsampled augmented data into a .h5 file.
 
     Parameters
     ----------
-    trials: list of arrays with shape (n_electrodes, n_samples, 1)
+    trials: list of arrays with shape (n_electrodes, n_samples, 1). Data must already be normalized for artifact detection to work
     labels: list of ints
+    kinds: list of experiment type (open or closed loop) with length equal to len(trials) and len(labels)
     ids_folds: list of list
         It contains num_folds sublist. Each sublist contains the indices of each fold, the number of which is around 1 / num_folds.
     h5_file: str
         The path to the .h5 data file.
     config: dict
         A dict of information in the assigned yaml file.
+
 
     Notes
     -----
@@ -241,6 +248,8 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
     stride = config['stride']
     new_samp_freq = config['new_sampling_frequency']
     num_noise = config['num_noise']
+    detect_artifacts = config['artifact_handling']['detect_artifacts']
+    reject_std = config['artifact_handling']['reject_std']
 
     window_size = int(new_samp_freq * window_length / 1000)
     portion = int(0.2 * window_length)
@@ -261,6 +270,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         pbar.set_description("Augmenting fold " + str(fold))
 
         counter = 0
+        artifacts_detected = 0
         dist = []
 
         for i in pbar:
@@ -274,6 +284,16 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                 trial_window = trial[:, window_start:window_end, :]
                 label_window = label[1][window_start:window_end]
 
+                #If detecting artifacts, skip this window if artifact detected
+                if detect_artifacts:
+                    #Reshape data to [samples, electrodes] for artifact detection
+                    if detect_artifact(np.reshape(trial_window, [window_size, n_electrodes]), 
+                                       reject_std):
+                        artifacts_detected += 1
+                        window_start += stride
+                        window_end += stride
+                        continue
+                
                 # new_label = label[0]
                 if kind == 'OL':
                     new_label = label[0]
@@ -305,7 +325,39 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         val_trials = file.create_dataset(str(fold)+'_val_trials', data=dataset1[::5])
         val_labels = file.create_dataset(str(fold)+'_val_labels', data=dataset2[::5])
         label_distribution = np.unique(dist, return_counts=True)
+        artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1))
 
         print(f'Label distribution in fold {fold}:')
         print(np.unique(dist,return_counts=True))
+        print(f'Share of windows rejected as containing artifacts = {artifact_rejection_percent}')
     file.close()
+
+def detect_artifact(eeg_data,
+                    reject_std=5.5):
+    '''This function checks eeg data for artifacts. In each channel it looks for outliers based on a given mean and 
+    standard deviation for the overall dataset.
+
+    Note: This function expects to see data which is already normalized
+
+    eeg data should be a window of eeg data. Should be shape [samples, electrodes].
+
+    reject_std is the number of standard deviations to allow each channel to vary by. If any data points in a window exceed 
+    this threshold, the window will be marked as containing an artifact.
+    
+    It returns True if an artifact is detected, otherwise False.
+    
+    '''
+    
+    #Set flag for whether this window is bad data
+    bad_window = False
+    #Iterate across all the data points in the data and check if any electrodes exceed rejection threshold
+    for i in range(eeg_data.shape[0]):
+        #If already found bad window, end this loop
+        if bad_window:
+            break
+        #Check each electrode at this timepoint
+        deviations = abs(eeg_data[i,])
+        if any(deviations > reject_std):
+            bad_window = True
+
+    return bad_window
