@@ -270,10 +270,12 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
     (n_trials, n_electrodes, n_samples, 1) and (n_trials,), respectively.
     '''
 
-    window_length = config['window_length']
-    stride = config['stride']
-    new_samp_freq = config['new_sampling_frequency']
-    num_noise = config['num_noise']
+    window_length = config['augmentation']['window_length']
+    stride = config['augmentation']['stride']
+    new_samp_freq = config['augmentation']['new_sampling_frequency']
+    num_noise = config['augmentation']['num_noise']
+    detect_artifacts = config['artifact_handling']['detect_artifacts']
+    reject_std = config['artifact_handling']['reject_std']
 
     window_size = int(new_samp_freq * window_length / 1000)
     portion = int(0.2 * window_length)
@@ -294,6 +296,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         pbar.set_description("Augmenting fold " + str(fold))
 
         counter = 0
+        artifacts_detected = 0
         dist = []
 
         for i in pbar:
@@ -317,6 +320,17 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                         window_start += stride
                         window_end += stride
                         continue
+                
+                #If detecting artifacts, skip this window if artifact detected
+                if detect_artifacts:
+                    #Reshape data to [samples, electrodes] for artifact detection
+                    if detect_artifact(np.reshape(trial_window, [window_length, n_electrodes]), 
+                                       reject_std):
+                        artifacts_detected += 1
+                        window_start += stride
+                        window_end += stride
+                        continue
+                
                 dist.append(new_label)
 
                 # save the original data of this window
@@ -337,12 +351,45 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         val_trials = file.create_dataset(str(fold)+'_val_trials', data=dataset1[::5])
         val_labels = file.create_dataset(str(fold)+'_val_labels', data=dataset2[::5])
         label_distribution = np.unique(dist, return_counts=True)
+        artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1) + artifacts_detected)
 
         print(f'Label distribution in fold {fold}:')
         print(np.unique(dist,return_counts=True))
+        print(f'Share of windows rejected as containing artifacts = {artifact_rejection_percent}')
     file.close()
 
 
+def detect_artifact(eeg_data,
+                    reject_std=5.5):
+    '''This function checks eeg data for artifacts. In each channel it looks for outliers based on a given mean and 
+    standard deviation for the overall dataset.
+
+    Note: This function expects to see data which is already normalized
+
+    eeg data should be a window of eeg data. Should be shape [samples, electrodes].
+
+    reject_std is the number of standard deviations to allow each channel to vary by. If any data points in a window exceed 
+    this threshold, the window will be marked as containing an artifact.
+    
+    It returns True if an artifact is detected, otherwise False.
+    
+    '''
+    
+    #Set flag for whether this window is bad data
+    bad_window = False
+    #Iterate across all the data points in the data and check if any electrodes exceed rejection threshold
+    for i in range(eeg_data.shape[0]):
+        #If already found bad window, end this loop
+        if bad_window:
+            break
+        #Check each electrode at this timepoint
+        deviations = abs(eeg_data[i,])
+        if any(deviations > reject_std):
+            bad_window = True
+
+    return bad_window
+
+            
 def create_dataset(config, h5_path):
     '''creates dataset as h5 file according to yaml_file and stores it at path given by h5_path
     
@@ -377,7 +424,7 @@ def create_dataset(config, h5_path):
     ids_folds = partition_data(labels, config['partition']['num_folds'])
 
     # Augment dataset according to each fold
-    augment_data_to_file(trials, labels, kinds, ids_folds, h5_path, config['augmentation'])
+    augment_data_to_file(trials, labels, kinds, ids_folds, h5_path, config)
 
 
 if __name__ == "__main__":

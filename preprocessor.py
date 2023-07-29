@@ -265,10 +265,6 @@ class DataPreprocessor:
 
         return data
 
-    def preprocess_like_closed_loop(self, data):
-
-        pass
-
 class Welfords:
     """
     Welford's algorithm computes the standard deviation, mean (and variance) incrementally.

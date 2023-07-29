@@ -6,11 +6,12 @@ data_dir: /data/raspy/                          # path to data pool.
 model_dir: /data/raspy/trained_models/          # path to store trained models.
 h5_dir: /data/raspy/preprocessed_data/          # path to store preprocessed data.
 model_arch_dir: ./EEGNet.py
-config_dir: ./config.yaml
+config_dir: ./shared_utils/config.yaml
 data_names:
-  - 2023-07-22_S1_OL_1_RL 
+  - 2023-06-30_XU_OL_1
+  # - 2023-07-22_S1_OL_1_RL 
   # - 2023-07-22_S1_OL_2_RL
-  - 2023-07-22_S1_OL_3_RL
+  # - 2023-07-22_S1_OL_3_RL
   # - 2023-06-16_XU_OL_1_LeftRight_20min
   # - 2023-07-22_S1_OL_4_RWristMath
   # - 2023-07-22_S1_OL_5_LWristRWrist
@@ -60,6 +61,16 @@ data_preprocessor:
     lowcut: 4                       # the low pass band.
     highcut: 40                     # the high pass band.
     order: 5                        # the order of the filter.
+    
+labeling:
+  labels_to_keep:
+    - all
+  relabel_pairs:                    # used to simulate when tasks are remapped during closed loop experiments. For instance, in a closed loop experiment if the mental math task was used to move the cursor right in bci_raspy settings the label for that task in the closed loop data would be a 1 (the usual label for left), while in the training data it would be a 4 (the usual label for math). To correct for this, pass 1, 4 into relabel pairs, so that task labels of 1 in the test dataset will be reassigned to be 4 (to match the corresponding training data).
+    - ~                             
+
+artifact_handling:
+  detect_artifacts: True            # Whether to detect and discard artifacts
+  reject_std: 5.5                   # number of standard deviations to allow each channel to vary by. If any data points in a window exceed this threshold, the window will be marked as containing an artifact.
 
 dataset_generator:
   dataset_operation:                # see usage examples below
@@ -97,6 +108,15 @@ augmentation:
   stride: 100                                 # the stride of the window to slide.
   new_sampling_frequency: &new_s_f_ 100       # the sampling frequency to downsample to for 1s data.
   num_noise: 4                                # the number of noise windows to add to one original data window.
+
+
+# ============================================
+# ========  Parameters for Raspy    ==========
+# ============================================
+
+#PICK UP WORK HERE NEED TO UNIFY WITH RASPY CONFIG FILE 
+
+
 
 # ============================================
 # ========  Parameters for Training   ========
