@@ -255,13 +255,15 @@ class DataPreprocessor:
             if self.first_run:
                 if self.normalizer_type == 'welfords':
                     self.normalizer = Welfords(data)
-                if self.normalizer_type == 'running_mean':
+                elif self.normalizer_type == 'running_mean':
                     self.normalizer = Running_Mean(data)
+                else:
+                    raise ValueError("no such noramlizer as:", self.normalizer)
                 self.first_run == False
             else:
                 self.normalizer(data)
             #Normalize this sample
-            data = ((data-normalizer.mean) / normalizer.std)
+            data = ((data-self.normalizer.mean) / self.normalizer.std)
 
         return data
 
