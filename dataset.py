@@ -150,8 +150,7 @@ class DatasetGenerator:
             all_trials.extend(trials)
             all_labels.extend(labels)
             all_kinds.extend(kinds)
-        output_dim = len(set([label[0] for label in all_labels]))
-        return all_trials, all_labels, all_kinds, output_dim
+        return all_trials, all_labels, all_kinds
 
 
 
@@ -418,7 +417,7 @@ def create_dataset(config, h5_path):
         data_dicts.append([eeg_data, task_data, kind])                                    # store in data_dicts
 
     # Generate the dataset on trial level
-    trials, labels, kinds, output_dim = dataset_generator.generate_dataset(data_dicts)
+    trials, labels, kinds = dataset_generator.generate_dataset(data_dicts)
 
     # Partition data by partitioning the indices
     ids_folds = partition_data(labels, config['partition']['num_folds'])
