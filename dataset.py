@@ -138,8 +138,6 @@ class DatasetGenerator:
             Stores reassigned labels.
         all_kinds: list of string
             Stores the kind of each trial.
-        output_dim: int
-            Count how many different classes in the dataset.
         '''
 
         all_trials, all_labels, all_kinds = [], [], []
