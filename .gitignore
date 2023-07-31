@@ -2,3 +2,7 @@ pycache/*
 __pycache__/
 /pycache/*
 __pycache__
+*.pt
+*.pyc
+__pycache__
+.ipynb_checkpoints/
