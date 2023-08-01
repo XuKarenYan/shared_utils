@@ -218,6 +218,20 @@ class DataPreprocessor:
         else:
             return False
 
+    def throw_channels(self, data):
+        '''Throw out channels we don't need.
+
+        Parameters
+        ----------
+        data: 2-d array with shape (n_samples, n_electrodes)
+            Data from eeg_data['databuffer'].
+        '''
+
+        ch_names, _ = self.get_electrode_position()
+        ch_index_to_drop = [ch_names.index(ch) for ch in self.ch_to_drop]
+        data = np.delete(data, ch_index_to_drop, axis=1)
+        return data
+
     def preprocess(self, data):
         '''Manage the whole preprocessing procedure.
 
@@ -231,10 +245,8 @@ class DataPreprocessor:
         data: 2-d array with shape (n_samples, n_electrodes)
         '''
 
-        # Throw out channels we don't want
-        ch_names, _ = self.get_electrode_position()
-        ch_index_to_drop = [ch_names.index(ch) for ch in self.ch_to_drop]
-        data = np.delete(data, ch_index_to_drop, axis=1)
+        # Throw out channels
+        data = self.throw_channels(data)
 
         # Apply filters
         if self.apply_bandpass:                     # bandpass filter

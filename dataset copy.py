@@ -38,7 +38,7 @@ class DatasetGenerator:
         self.window_length = config['window_length']
         self.omit_angles = config['omit_angles']
 
-    def cut_into_trials(self, eeg_data, task_data, kind, for_mne=False):
+    def cut_into_trials(self, eeg_data, task_data, kind):
         '''Cut the eeg signals in shape (n_samples, n_electrodes) into trials according to the info from task_data.
 
         Parameters
@@ -49,8 +49,6 @@ class DatasetGenerator:
             Stores the info reading from task.bin file. See function read_data_file_to_dict for details.
         kind: string
             Indicates which kind of dataset it is, either 'OL' or 'CL'.
-        for_mne: bool
-            Only use it when doing visualization.
 
         Returns
         -------
@@ -66,9 +64,6 @@ class DatasetGenerator:
         trial_labels = task_data['state_task'].flatten()[state_changes][:-1]                  # get the labels of each trial, drop the last 
         if kind == 'CL':
             trial_labels_in_ms = generateLabelWithRotation(task_data, self.omit_angles)
-        if for_mne:
-            game_state_change = [sc-1 for sc in state_changes]
-            game_states = task_data['game_state'].flatten()[game_state_change][:-1]
 
         # Partition trials with the first and the last trials dropped, and drop trials that are too short (than window_length) as well
         task_starts = state_changes[:-1]
@@ -81,8 +76,6 @@ class DatasetGenerator:
         for idx in range(len(task_starts)):
             # drop trials that are too short for the model to train on
             if int(eeg_ends[idx] - eeg_starts[idx] - self.first_ms_to_drop) < self.window_length:
-                if for_mne:
-                    del game_states[idx]
                 continue
 
             # append data, label of each trial to respective lists
@@ -95,10 +88,7 @@ class DatasetGenerator:
         # Reshape trials into image-like 3-d data
         trials = [np.expand_dims(trial.transpose(1, 0), axis=-1) for trial in trials]
 
-        if for_mne:
-            return trials, labels, game_states
-        else:
-            return trials, labels
+        return trials, labels
     
     def select_trials_and_relabel(self, trials, labels, index):
         '''Select the trials that we want to keep based on the information from the yaml file.
