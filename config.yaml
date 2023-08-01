@@ -74,20 +74,20 @@ artifact_handling:
 
 dataset_generator:
   dataset_operation:                # see usage examples below
-    concatenate: False
+    concatenate: True
     selected_labels:
       - 0
       - 1
-      # - 2
-      # - 3
-      # - 4
-    mapped_labels:
+      - 2
+      - 3
+      - 4
+    mapped_labels:                  # pick up work here: explain how these work, what are these settings?
       class0:
-        - 0
+        - 2
         - ~
       class1:
-        - ~
-        - 0
+        - 3
+        - 3
       # class2:
       # #   - 3
       # #   - ~

@@ -201,3 +201,181 @@ if __name__ == "__main__":
     print("EEG_Data",eeg_data["databuffer"].shape)
     print("random model name", model_name)
 
+def partition_data(labels, num_folds):
+    '''Partition the indices of the trials into the number of folds. Data of different labels are balanced among folds. NOT partitioning the data of the trials.
+    
+    Parameters
+    ----------
+    labels: list of tuples
+        The labels of each trial.
+    num_folds: int
+        The number of folds we use for k-fold validation.
+
+    Returns
+    -------
+    ids_folds: list of list
+        It contains num_folds sublist. Each sublist contains the indices of this fold, the number of which is around 1 / num_folds.
+    '''
+    
+    ids = np.arange(len(labels))
+    labels = [label[0] for label in labels]
+    label_set = list(set(labels))
+
+    sub_ids = []
+    for label in label_set:
+        selected_ids = [l[0] for l in zip(ids, labels) if l[1] == label]
+        np.random.shuffle(selected_ids)
+        sub_ids_folds = np.array_split(selected_ids, num_folds)
+        sub_ids.append(sub_ids_folds)
+
+    ids_folds = [np.concatenate([subgroup[i] for subgroup in sub_ids]) for i in range(num_folds)]
+
+    return ids_folds
+
+
+
+def augment_data_to_file(trials, 
+                         labels, 
+                         kinds,
+                         ids_folds, 
+                         h5_file, 
+                         config):#TODO
+    '''For each fold of data, augment the data to a 5x large dataset by adding 4 separate noises to each data window. Store the downsampled augmented data into a .h5 file.
+
+    Parameters
+    ----------
+    trials: list of arrays with shape (n_electrodes, n_samples, 1). Data must already be normalized for artifact detection to work
+    labels: list of ints
+    kinds: list of experiment type (open or closed loop) with length equal to len(trials) and len(labels)
+    ids_folds: list of list
+        It contains num_folds sublist. Each sublist contains the indices of each fold, the number of which is around 1 / num_folds.
+    h5_file: str
+        The path to the .h5 data file.
+    config: dict
+        A dict of information in the assigned yaml file.
+
+
+    Notes
+    -----
+    The augmented data will be stored in file named "data.h5". The augmented trials and augmented labels will be stored as an array with shape
+    (n_trials, n_electrodes, n_samples, 1) and (n_trials,), respectively.
+    '''
+
+    window_length = config['window_length']
+    stride = config['stride']
+    new_samp_freq = config['new_sampling_frequency']
+    num_noise = config['num_noise']
+    detect_artifacts = config['artifact_handling']['detect_artifacts']
+    reject_std = config['artifact_handling']['reject_std']
+
+    window_size = int(new_samp_freq * window_length / 1000)
+    portion = int(0.2 * window_length)
+    labels_to_keep = set([label[0] for label in labels])
+    
+    file = h5py.File(h5_file, 'w')
+    for fold, ids in enumerate(ids_folds):
+        a_trials = [trials[j] for j in ids]
+        a_labels = [labels[j] for j in ids]
+        a_kinds = [kinds[j] for j in ids]
+
+        n_electrodes = a_trials[0].shape[0]
+        n_train_windows = np.sum([((data.shape[1] - window_length) // stride) + 1 for data in a_trials]) * (1+num_noise)
+        dataset1 = file.create_dataset(str(fold)+'_trials', shape=(n_train_windows, n_electrodes, window_size, 1), dtype='float32')
+        dataset2 = file.create_dataset(str(fold)+'_labels', shape=(n_train_windows,), dtype='int32')
+        
+        pbar = tqdm.tqdm(range(len(a_labels)))
+        pbar.set_description("Augmenting fold " + str(fold))
+
+        counter = 0
+        artifacts_detected = 0
+        dist = []
+
+        for i in pbar:
+            trial, label, kind = a_trials[i], a_labels[i], a_kinds[i]
+            n_samples = trial.shape[1]
+
+            # Slide a window on this trial
+            window_start = 0
+            window_end = window_start + window_length
+            while (window_end <= n_samples):
+                trial_window = trial[:, window_start:window_end, :]
+                label_window = label[1][window_start:window_end]
+                
+                # new_label = label[0]
+                if kind == 'OL':
+                    new_label = label[0]
+                else:
+                    new_label, label_num = Counter(label_window).most_common(1)[0]
+                    if label_num / len(label_window) < 0.8:
+                        new_label = Counter(label_window[portion:]).most_common(1)[0][0]
+                    if new_label not in labels_to_keep:
+                        window_start += stride
+                        window_end += stride
+                        continue
+                
+                #If detecting artifacts, skip this window if artifact detected
+                if detect_artifacts:
+                    #Reshape data to [samples, electrodes] for artifact detection
+                    if detect_artifact(np.reshape(trial_window, [window_size, n_electrodes]), 
+                                       reject_std):
+                        artifacts_detected += 1
+                        window_start += stride
+                        window_end += stride
+                        continue
+                
+                dist.append(new_label)
+
+                # save the original data of this window
+                dataset1[counter] = resample(trial_window, window_size, axis=1)
+                dataset2[counter] = new_label
+                counter += 1
+
+                # generate 4 different noised data of this window and save
+                for j in range(num_noise):
+                    noise = np.max(trial_window) * np.random.uniform(-0.5, 0.5, trial_window.shape)
+                    dataset1[counter] = resample(trial_window + noise, window_size, axis=1)
+                    dataset2[counter] = new_label
+                    counter += 1
+
+                window_start += stride
+                window_end += stride
+            
+        val_trials = file.create_dataset(str(fold)+'_val_trials', data=dataset1[::5])
+        val_labels = file.create_dataset(str(fold)+'_val_labels', data=dataset2[::5])
+        label_distribution = np.unique(dist, return_counts=True)
+        artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1) + artifacts_detected)
+
+        print(f'Label distribution in fold {fold}:')
+        print(np.unique(dist,return_counts=True))
+        print(f'Share of windows rejected as containing artifacts = {artifact_rejection_percent}')
+    file.close()
+
+def detect_artifact(eeg_data,
+                    reject_std=5.5):
+    '''This function checks eeg data for artifacts. In each channel it looks for outliers based on a given mean and 
+    standard deviation for the overall dataset.
+
+    Note: This function expects to see data which is already normalized
+
+    eeg data should be a window of eeg data. Should be shape [samples, electrodes].
+
+    reject_std is the number of standard deviations to allow each channel to vary by. If any data points in a window exceed 
+    this threshold, the window will be marked as containing an artifact.
+    
+    It returns True if an artifact is detected, otherwise False.
+    
+    '''
+    
+    #Set flag for whether this window is bad data
+    bad_window = False
+    #Iterate across all the data points in the data and check if any electrodes exceed rejection threshold
+    for i in range(eeg_data.shape[0]):
+        #If already found bad window, end this loop
+        if bad_window:
+            break
+        #Check each electrode at this timepoint
+        deviations = abs(eeg_data[i,])
+        if any(deviations > reject_std):
+            bad_window = True
+
+    return bad_window
