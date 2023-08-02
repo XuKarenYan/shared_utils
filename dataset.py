@@ -118,7 +118,7 @@ class DatasetGenerator:
         filtered_labels: list of tuples
         '''
 
-        if self.dataset_operation['concatenate']:
+        if not self.dataset_operation['relabel']:
             if self.dataset_operation['selected_labels']:           # use the data with selected labels
                 filtered_trials = [trial for trial, label in zip(trials, labels) if label[0] in self.dataset_operation['selected_labels']]
                 filtered_labels = [label for label in labels if label[0] in self.dataset_operation['selected_labels']]
