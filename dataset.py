@@ -225,6 +225,29 @@ def generateLabelWithRotation(task, omitAngles=10):
 
     return label1ms
 
+def decideLabelWithRotation(label_window, 
+                            preponderance=0.8,
+                            final_portion=0.2):
+    '''Evaluates a window of a closed loop experiment to determine what final 
+    label should be assigned.
+    
+    Takes in a label_window which should be a list of labels for every ms which represents 
+    the relative position of the cursor to the target in that ms.
+
+    preponderance is the share of labels in the window that must be a single label for 
+    the window to be assigned that label.
+
+    final_portion is used when no label appears more than the preponderance share, 
+    and instead assigns the most common label in the final_portion of the label_window
+    
+    Returns the single label that should be assigned to that window.'''
+    portion = int((1 - final_portion) * len(label_window))
+
+    new_label, label_num = Counter(label_window).most_common(1)[0]
+    if label_num / len(label_window) < 0.8:
+        new_label = Counter(label_window[portion:]).most_common(1)[0][0]
+    return new_label
+
 
 def partition_data(labels, num_folds):
     '''Partition the indices of the trials into the number of folds. Data of different labels are balanced among folds. NOT partitioning the data of the trials.
@@ -320,9 +343,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                 if kind == 'OL':
                     new_label = label[0]
                 else:
-                    new_label, label_num = Counter(label_window).most_common(1)[0]
-                    if label_num / len(label_window) < 0.8:
-                        new_label = Counter(label_window[portion:]).most_common(1)[0][0]
+                    new_label = decideLabelWithRotation(label_window)
                     if new_label not in labels_to_keep:
                         window_start += stride
                         window_end += stride
