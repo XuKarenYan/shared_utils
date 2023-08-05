@@ -36,7 +36,7 @@ class DataPreprocessor:
         self.order = config['bandpass_filter']['order']
         self.sf = config['sampling_frequency']
         self.online_status = config['online_status']
-        self.normalizer_type = config['normalizer_type']
+        self.normalizer_type = config['closed_loop_settings']['normalizer_type']
         self.first_run = True
 
     def get_electrode_position(self):
@@ -270,11 +270,10 @@ class DataPreprocessor:
                 elif self.normalizer_type == 'running_mean':
                     self.normalizer = Running_Mean(data)
                 else:
-                    raise ValueError("no such noramlizer as:", self.normalizer)
+                    raise ValueError("no such noramlizer as:", self.normalizer_type)
                 self.first_run == False
-            else:
-                self.normalizer(data)
-            #Normalize this sample
+            #Normalize this sample with data up to (but not including) this point in time
+            #only want to include this datapoint in normalization going forward if no artifact
             data = ((data-self.normalizer.mean) / self.normalizer.std)
 
         return data
