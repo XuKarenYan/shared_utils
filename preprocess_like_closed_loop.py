@@ -1,8 +1,16 @@
-from utils import read_data_file_to_dict, detect_artifacts, decide_kind
-from preprocessor import DataPreprocessor
-from dataset import generateLabelWithRotation, decideLabelWithRotation
+
 from scipy.signal import resample
 import numpy as np
+try:
+    # relative path needed if to be used as module
+    from .preprocessor import DataPreprocessor
+    from .utils import read_data_file_to_dict, detect_artifact, decide_kind
+    from .dataset import  generateLabelWithRotation, decideLabelWithRotation
+except ImportError:
+    # absolute path selected if to ran as stand alone shared_utils
+    from preprocessor import DataPreprocessor
+    from utils import read_data_file_to_dict, detect_artifact, decide_kind
+    from dataset import generateLabelWithRotation, decideLabelWithRotation
 
 class PreprocessLikeClosedLoop:
     '''This class handles takes one or more data files and transforms them into 
@@ -38,7 +46,7 @@ class PreprocessLikeClosedLoop:
         self.config = config
         self.data_folder = config['data_dir']
         if len(config['data_names']) > 1:
-            print(f'This Class can only operate on a single dataset at a time. Only {config['data_names'][0]} is being used')
+            print(f"This Class can only operate on a single dataset at a time. Only {config['data_names'][0]} is being used")
         self.data_name = config['data_names'][0]
         self.kind = decide_kind(self.data_name)
         self.omit_angles = config['dataset_generator']['omit_angles']
@@ -48,14 +56,14 @@ class PreprocessLikeClosedLoop:
         self.labels_to_keep = config['labeling']['labels_to_keep']
         self.relabel_pairs = config['labeling']['relabel_pairs']
         self.window_length = config['dataset_generator']['window_length']
-        self.normalizer_type = config['closed_loop_settings']['normalizer_type']
+        self.normalizer_type = config['data_preprocessor']['closed_loop_settings']['normalizer_type']
         self.detect_artifacts = config['artifact_handling']['detect_artifacts']
         self.reject_std = config['artifact_handling']['reject_std']
         self.initial_ticks = config['artifact_handling']['initial_ticks']
         self.resample_rate = int(config['augmentation']['new_sampling_frequency'] * self.window_length / 1000)
         self.first_run = True
 
-    def generate_dataset(self, data_dir):
+    def generate_dataset(self):
         '''This function preprocesses data in the same way it happens online in a 
         closed loop experiment. In other words, it iterates over the data tick by 
         tick an processes it using only data available at that point in time.
@@ -89,7 +97,7 @@ class PreprocessLikeClosedLoop:
         #Add intertrial periods to list of bad labels
         bad_labels = [-1]
         #Add other labels we want to exclude to bad labels
-        if labels_to_keep != ['all']:
+        if self.labels_to_keep != ['all']:
             also_bad = [label for label in all_labels.list() if label not in labels_to_keep]
             bad_labels = bad_labels + also_bad
 
@@ -141,9 +149,9 @@ class PreprocessLikeClosedLoop:
                     continue
                 
                 #Relabel this window if needed
-                if self.relabel_pairs:
+                if self.relabel_pairs != [None]:
                     for pair in self.relabel_pairs:
-                        if label = pair[0]:
+                        if label == pair[0]:
                             label = pair[1]
 
                 #Downsample to final desired rate

@@ -181,7 +181,6 @@ class DataPreprocessor:
         D = len(ch_names)
 
         laplacian_next = np.eye(D) - (next_adjacency / np.maximum(np.sum(next_adjacency, axis=1), 1)).T
-        print("Laplacian applied.")
 
         return data @ laplacian_next.T
 
