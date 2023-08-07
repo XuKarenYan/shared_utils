@@ -177,6 +177,12 @@ def read_data_file_to_dict(filename, return_dict=True):
         data_dict = {key: data[key] for key in keys}
         data_dict['name'] = name
         data_dict['dtypes'] = dtypes
+        
+        #Some data contains task data with an extra empty dimension - flatten if so
+        if 'state_task' in data_dict.keys():
+            if data_dict['state_task'].ndim == 2:
+                data_dict['state_task'] = data_dict['state_task'].flatten()
+
     return data_dict
 
 
