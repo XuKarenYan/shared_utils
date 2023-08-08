@@ -65,7 +65,7 @@ class DatasetGenerator:
         state_changes = np.flatnonzero(np.diff(task_data['state_task'].flatten())) + 1        # get the starting point of each trial, with the first trial dropped
         trial_labels = task_data['state_task'].flatten()[state_changes][:-1]                  # get the labels of each trial, drop the last 
         if kind == 'CL':
-            trial_labels_in_ms = generateLabelWithRotation(task_data, self.omit_angles)
+            trial_labels_in_ms = utils.generateLabelWithRotation(task_data, self.omit_angles)
         if for_mne:
             game_state_change = [sc-1 for sc in state_changes]
             game_states = task_data['game_state'].flatten()[game_state_change][:-1]
@@ -161,94 +161,6 @@ class DatasetGenerator:
         return all_trials, all_labels, all_kinds
 
 
-
-def generateLabelWithRotation(task, omitAngles=10):
-    '''Relabel the label for each sample in the close loop experiment according to the relative position between the cursor and the target. Then generate a list of labels for all EEG time steps.
-
-    Parameters
-    ----------
-    task: dict
-    omitAngles: int
-
-    Returns
-    -------
-    label1ms: list
-    '''
-
-    labelAngles = {"left" : [135+omitAngles,-135-omitAngles],
-                    "right" : [-45+omitAngles,45-omitAngles],
-                    "up" : [45+omitAngles,135-omitAngles],
-                    "down" : [-135+omitAngles,-45-omitAngles]}
-
-    label2num = {"left" : 0,
-                "right" : 1,
-                "up" : 2,
-                "down" : 3,
-                "still" : 4}
-
-    poses = task['decoded_pos']
-    targets = task['target_pos']
-    states = task['state_task']
-    targetSize = (0.2,0.2) if 'target_size' not in task else task['target_size'][-100]      # no dataset has this key. 
-
-    length = len(task['target_pos'])
-    labels = np.full(length,-1) # this is where I store the labels
-    dirs = targets - poses  # directions
-    dirsAngles = np.arctan2(dirs[:,1],dirs[:,0]) * 180 / np.pi          # TODO: (x, y) in each dirs, switch to degree
-
-    # 4 cardinal direction
-    invalidFlag = np.geterr()["invalid"] # "warn"
-    np.seterr(invalid='ignore') # ignore warning
-    for label,angle in labelAngles.items():
-        if label=="left":
-            select = (dirsAngles > angle[0]) + (dirsAngles < angle[1])
-        else:
-            select = (dirsAngles > angle[0]) * (dirsAngles < angle[1])
-        labels[select] = label2num[label]
-
-    # still direction
-    labels[states == 4] = label2num['still']
-
-    # still when inside target
-    posDirs = abs(dirs) 
-    inTarget = (posDirs[:,0] <= targetSize[0]) * (posDirs[:,1] <= targetSize[1])
-    labels[inTarget] = label2num['still']
-
-    np.seterr(invalid = invalidFlag) # go back to original invalid flag: "warn"
-
-    # stretch labels to 1ms 
-    steps = task['eeg_step']
-    label1ms = []
-    for i in range(1,len(steps)):
-        label1ms += [labels[i]] * (steps[i]-steps[i-1])
-    label1ms = np.array(label1ms)
-
-    return label1ms
-
-def decideLabelWithRotation(label_window, 
-                            preponderance=0.8,
-                            final_portion=0.2):
-    '''Evaluates a window of a closed loop experiment to determine what final 
-    label should be assigned.
-    
-    Takes in a label_window which should be a list of labels for every ms which represents 
-    the relative position of the cursor to the target in that ms.
-
-    preponderance is the share of labels in the window that must be a single label for 
-    the window to be assigned that label.
-
-    final_portion is used when no label appears more than the preponderance share, 
-    and instead assigns the most common label in the final_portion of the label_window
-    
-    Returns the single label that should be assigned to that window.'''
-    portion = int((1 - final_portion) * len(label_window))
-
-    new_label, label_num = Counter(label_window).most_common(1)[0]
-    if label_num / len(label_window) < 0.8:
-        new_label = Counter(label_window[portion:]).most_common(1)[0][0]
-    return new_label
-
-
 def partition_data(labels, num_folds):
     '''Partition the indices of the trials into the number of folds. Data of different labels are balanced among folds. NOT partitioning the data of the trials.
     
@@ -310,6 +222,8 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
     window_size = int(new_samp_freq * window_length / 1000)
     portion = int(0.2 * window_length)
     labels_to_keep = set([label[0] for label in labels])
+    #Create set to hold all labels
+    label_set = set()
     
     file = h5py.File(h5_file, 'w')
     for fold, ids in enumerate(ids_folds):
@@ -343,7 +257,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                 if kind == 'OL':
                     new_label = label[0]
                 else:
-                    new_label = decideLabelWithRotation(label_window)
+                    new_label = utils.decideLabelWithRotation(label_window)
                     if new_label not in labels_to_keep:
                         window_start += stride
                         window_end += stride
@@ -360,6 +274,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                         continue
                 
                 dist.append(new_label)
+                label_set.add(new_label)
 
                 # save the original data of this window
                 dataset1[counter] = resample(trial_window, window_size, axis=1)
@@ -385,6 +300,10 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         print(np.unique(dist,return_counts=True))
         print(f'Share of windows rejected as containing artifacts = {artifact_rejection_percent}')
     file.close()
+
+    #Get output dimension of eegnet to accomodate these labels
+    output_dim = max(label_set) + 1
+    return output_dim
 
 
 def detect_artifact(eeg_data,
@@ -452,7 +371,11 @@ def create_dataset(config, h5_path):
     ids_folds = partition_data(labels, config['partition']['num_folds'])
 
     # Augment dataset according to each fold
-    augment_data_to_file(trials, labels, kinds, ids_folds, h5_path, config)
+    output_dim = augment_data_to_file(trials, labels, kinds, ids_folds, h5_path, config)
+    print(f'output dim = {output_dim}')
+
+    #Return output dim for use in model architecture
+    return output_dim
 
 
 if __name__ == "__main__":
