@@ -194,7 +194,7 @@ def partition_data(labels, num_folds):
 
     return ids_folds
 
-def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TODO
+def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
     '''For each fold of data, augment the data to a 5x large dataset by adding 4 separate noises to each data window. Store the downsampled augmented data into a .h5 file.
 
     Parameters
