@@ -4,6 +4,7 @@ from scipy import signal
 import ast
 import random
 import yaml
+from collections import Counter
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
