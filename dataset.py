@@ -123,7 +123,9 @@ class DatasetGenerator:
                 filtered_trials = [trial for trial, label in zip(trials, labels) if label[0] in self.dataset_operation['selected_labels']]
                 filtered_labels = [label for label in labels if label[0] in self.dataset_operation['selected_labels']]
             else:                                                   # use all data
-                return trials, labels
+                #Drop only intertrial period, where label = -1
+                filtered_trials = [trial for trial, label in zip(trials, labels) if label[0] != -1]
+                filtered_labels = [label for label in labels if label[0] != -1]
         else:                                                       # select subset of data at trial level and change labels correspondingly
             mapping = {k: v[index] for k, v in self.dataset_operation['mapped_labels'].items()}
             filtered_trials = [trial for trial, label in zip(trials, labels) if label[0] in mapping.values()]

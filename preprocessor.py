@@ -2,6 +2,7 @@ import numpy as np
 from scipy.signal import butter, resample
 from scipy import signal
 import sys
+import tqdm
 try:
     # relative path needed if to be used as module
     from .utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
@@ -386,22 +387,23 @@ class PreprocessLikeClosedLoop:
         config['data_preprocessor']['online_status'] = 'online'
         #Save config to pass on to other classes
         self.config = config
-        self.kind = decide_kind(self.data_name)
         self.omit_angles = config['dataset_generator']['omit_angles']
         self.eeg_cap_type = config['data_preprocessor']['eeg_cap_type']
         self.ch_to_drop = config['data_preprocessor']['ch_to_drop']
         self.online_status = 'online'
-        self.labels_to_keep = config['labeling']['labels_to_keep']
-        self.relabel_pairs = config['labeling']['relabel_pairs']
         self.window_length = config['dataset_generator']['window_length']
         self.normalizer_type = config['data_preprocessor']['closed_loop_settings']['normalizer_type']
+        self.labels_to_keep = config['data_preprocessor']['closed_loop_settings']['labels_to_keep']
+        self.relabel_pairs = config['data_preprocessor']['closed_loop_settings']['relabel_pairs']
         self.detect_artifacts = config['artifact_handling']['detect_artifacts']
         self.reject_std = config['artifact_handling']['reject_std']
         self.initial_ticks = config['artifact_handling']['initial_ticks']
         self.resample_rate = int(config['augmentation']['new_sampling_frequency'] * self.window_length / 1000)
         self.first_run = True
 
-    def generate_dataset(self, eeg_data, task_data):
+    def generate_dataset(self, 
+                         data_name,
+                         data_dir = '/data/raspy/',):
         '''This function preprocesses data in the same way it happens online in a 
         closed loop experiment. In other words, it iterates over the data tick by 
         tick an processes it using only data available at that point in time.
@@ -409,8 +411,14 @@ class PreprocessLikeClosedLoop:
         eeg_data and task_data should be dictionaries extracted from a data file 
         using read_data_file_to_dict'''
 
+        #Generate eeg and task data dictionaries for test dataset
+        data_path = data_dir + data_name
+        eeg_data = read_data_file_to_dict(data_path + "/eeg.bin")
+        task_data = read_data_file_to_dict(data_path + "/task.bin")
+        
         #For closed loop experiments, generate label every ms of data
-        if self.kind == 'CL':
+        kind = decide_kind(data_name)
+        if kind == 'CL':
             trial_labels_in_ms = generateLabelWithRotation(task_data, self.omit_angles)
 
         #Instantiate preprocessor to drop channels, laplacian filter, and normalize data
@@ -422,7 +430,7 @@ class PreprocessLikeClosedLoop:
         #Create counter to track how many artifact windows are detected
         artifact_counter = 0
         #Create list of bad labels we don't want to consider
-        if self.kind == 'CL':
+        if kind == 'CL':
             all_labels = np.unique(trial_labels_in_ms)
         else:
             all_labels = np.unique(task_data['state_task'])
@@ -435,8 +443,9 @@ class PreprocessLikeClosedLoop:
 
 
         #Iterate across the ticks of the test dataset and process them
-        print('iterating across all ticks to preprocess like closed loop')
-        for tick in range(task_data['eeg_step'].shape[0]):
+        pbar = tqdm.tqdm(range(task_data['eeg_step'].shape[0]))
+        pbar.set_description('iterating across all ticks to preprocess like closed loop')
+        for tick in pbar:
             end_ix = task_data['eeg_step'][tick]
 
             #If not enough data to make prediction, move to next tick
@@ -445,7 +454,7 @@ class PreprocessLikeClosedLoop:
 
             #If we have enough data in the databuffer, use it
             else:
-                #Extract the latency period - that decoder would see closed loop
+                #Extract the latency period that decoder would see closed loop
                 start_ix = end_ix - self.window_length
                 data = eeg_data['databuffer'][start_ix:end_ix, :]
 
@@ -471,7 +480,7 @@ class PreprocessLikeClosedLoop:
                 preprocessor.normalizer.include(data)
 
                 #Get label for this tick
-                if self.kind == 'CL':
+                if kind == 'CL':
                     label = decideLabelWithRotation(trial_labels_in_ms[start_ix:end_ix])
                 else:
                     label = task_data['state_task'][tick]
