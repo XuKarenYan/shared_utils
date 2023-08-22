@@ -126,11 +126,17 @@ class DatasetGenerator:
                 return trials, labels
         else:                                                       # select subset of data at trial level and change labels correspondingly
             mapping = {k: v[index] for k, v in self.dataset_operation['mapped_labels'].items()}
+            flattened_mapping = {} # handle case where v is a list
+            for k,v in mapping.items():
+                if type(v) is list:
+                    for i in v: flattened_mapping[str(i)+k] = i
+                else: flattened_mapping[k] = v
+            mapping = flattened_mapping # no change if mapping contains no list of label for single dataset
             filtered_trials = [trial for trial, label in zip(trials, labels) if label[0] in mapping.values()]
             mapping = {v: int(k[-1]) for k, v in mapping.items()}
             filtered_labels = [(mapping[label[0]], label[1]) for label in labels if label[0] in mapping]                                        # change the label of each trial
             filtered_labels = [(trial_labels[0], [mapping.get(label, -1) for label in trial_labels[1]]) for trial_labels in filtered_labels]    # change the label of each sample for each trial
-
+            
         return filtered_trials, filtered_labels
     
     def generate_dataset(self, data_dicts):
