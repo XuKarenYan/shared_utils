@@ -81,6 +81,14 @@ dataset_generator:
   first_ms_to_drop: 1000                      # time in ms dropped from each trial which has less useful information at the beginning.
   window_length: &window_length_ 1000         # the time window in ms of data in each step during training. This is used to remove trials that are too short.
   omit_angles: 10
+  # omit_trials: 
+  #   0: # dataset
+  #     - 20 # indexing: 1st trial has index 1
+  #     - 40
+  # selected_seconds: # in seconds
+  #   0: # dataset
+  #     - [0,300] # 0 marks the beginning of time (0s)
+  #     - [300,-1] # -1 marks the end
 
 partition:
   num_folds: &num_folds_ 5                    # the number of fold in k-fold validation.
