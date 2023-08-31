@@ -37,8 +37,10 @@ class DatasetGenerator:
         self.first_ms_to_drop = config['first_ms_to_drop']
         self.window_length = config['window_length']
         self.omit_angles = config['omit_angles']
+        self.omit_trials = config.get('omit_trials',{})
+        self.selected_seconds = config.get('selected_seconds',{})
 
-    def cut_into_trials(self, eeg_data, task_data, kind, for_mne=False):
+    def cut_into_trials(self, eeg_data, task_data, kind, index, for_mne=False):
         '''Cut the eeg signals in shape (n_samples, n_electrodes) into trials according to the info from task_data.
 
         Parameters
@@ -49,6 +51,8 @@ class DatasetGenerator:
             Stores the info reading from task.bin file. See function read_data_file_to_dict for details.
         kind: string
             Indicates which kind of dataset it is, either 'OL' or 'CL'.
+        index: int
+            Indicates which dataset it is in all the datasets we use.
         for_mne: bool
             Only use it when doing visualization.
 
@@ -56,6 +60,8 @@ class DatasetGenerator:
         -------
         trials: list of arrays with shape (n_electrodes, n_samples, 1)
             Trials here don't include the first and the last trials.
+            Trials here don't include omit trials
+            Trials here only includes the selected length
         labels: list of tuples where each tuple is (label of the trial, labels of each sample in this trial) with shape (int, an array with shape (n_samples, ))
             Corresponds to the labels of each sample in each trial.
         '''
@@ -78,12 +84,40 @@ class DatasetGenerator:
         eeg_starts = np.where(eeg_starts==-1, 0, eeg_starts)
         eeg_ends = task_data['eeg_step'][task_ends]
 
+        # prepare to filter selected_seconds (first print how many seconds is in data)
+        start_times_by_trial = (eeg_data['time_ns'][eeg_starts] - eeg_data['time_ns'][0]) / (10**9)
+        end_times_by_trial = (eeg_data['time_ns'][eeg_ends] - eeg_data['time_ns'][0]) / (10**9)
+        print(f"dataset #{index}: {round(((task_data['time_ns'][-1]-task_data['time_ns'][0]) / (10**9)))} seconds")
+
         for idx in range(len(task_starts)):
             # drop trials that are too short for the model to train on
             if int(eeg_ends[idx] - eeg_starts[idx] - self.first_ms_to_drop) < self.window_length:
                 if for_mne:
                     del game_states[idx]
                 continue
+
+            # omit trials in omit_trials
+            if index in self.omit_trials and (idx+2) in self.omit_trials[index]:
+                # recall trial1 in omit_trials refers to trial0 because of indexing
+                # However, since first trial already dropped trials[0] is really referring to trial2 in omit_trials
+                if for_mne:
+                    del game_states[idx]
+                continue
+
+            # omit trials outside of selected_seconds
+            if index in self.selected_seconds:
+                time_frames = self.selected_seconds[index]
+                withinTimeFrame = False
+                for start_time, end_time in time_frames:
+                    if end_time < 0: end_time = end_times_by_trial[-1]
+                    # check if start and end of trial is within specified time frame
+                    if start_time <= end_times_by_trial[idx] <= end_time and start_time <= start_times_by_trial[idx] <= end_time:
+                        withinTimeFrame = True
+                        break
+                if not withinTimeFrame:
+                    if for_mne:
+                        del game_states[idx]
+                    continue
 
             # append data, label of each trial to respective lists
             trials.append(eeg_data['databuffer'][eeg_starts[idx]:eeg_ends[idx]])
@@ -158,7 +192,7 @@ class DatasetGenerator:
 
         all_trials, all_labels, all_kinds = [], [], []
         for i, (eeg_data, task_data, kind) in enumerate(data_dicts):
-            trials, labels = self.cut_into_trials(eeg_data, task_data, kind)
+            trials, labels = self.cut_into_trials(eeg_data, task_data, kind, i)
             trials, labels = self.select_trials_and_relabel(trials, labels, i)
             kinds = len(labels) * [kind]
             all_trials.extend(trials)
@@ -300,7 +334,8 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         a_labels = [labels[j] for j in ids]
         a_kinds = [kinds[j] for j in ids]
 
-        n_electrodes = a_trials[0].shape[0]
+        if len(a_trials) != 0:
+            n_electrodes = a_trials[0].shape[0]
         n_train_windows = np.sum([((data.shape[1] - window_length) // stride) + 1 for data in a_trials]) * (1+num_noise)
         dataset1 = file.create_dataset(str(fold)+'_trials', shape=(n_train_windows, n_electrodes, window_size, 1), dtype='float32')
         dataset2 = file.create_dataset(str(fold)+'_labels', shape=(n_train_windows,), dtype='int32')
@@ -364,7 +399,8 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         val_trials = file.create_dataset(str(fold)+'_val_trials', data=dataset1[::5])
         val_labels = file.create_dataset(str(fold)+'_val_labels', data=dataset2[::5])
         label_distribution = np.unique(dist, return_counts=True)
-        artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1) + artifacts_detected)
+        if counter == 0: artifact_rejection_percent = 0.
+        else: artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1) + artifacts_detected)
 
         print(f'Label distribution in fold {fold}:')
         print(np.unique(dist,return_counts=True))
