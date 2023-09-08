@@ -190,15 +190,17 @@ class DatasetGenerator:
             Stores the kind of each trial.
         '''
 
-        all_trials, all_labels, all_kinds = [], [], []
+        all_trials, all_labels, all_kinds, all_dataset_indexs = [], [], [], []
         for i, (eeg_data, task_data, kind) in enumerate(data_dicts):
             trials, labels = self.cut_into_trials(eeg_data, task_data, kind, i)
             trials, labels = self.select_trials_and_relabel(trials, labels, i)
             kinds = len(labels) * [kind]
+            dataset_indexs = len(labels) * [i]
             all_trials.extend(trials)
             all_labels.extend(labels)
             all_kinds.extend(kinds)
-        return all_trials, all_labels, all_kinds
+            all_dataset_indexs.extend(dataset_indexs)
+        return all_trials, all_labels, all_kinds, all_dataset_indexs
 
 
 
@@ -297,13 +299,15 @@ def partition_data(labels, num_folds):
 
     return ids_folds
 
-def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TODO
+def augment_data_to_file(trials, labels, kinds, dataset_indexs, ids_folds, h5_file, config):#TODO
     '''For each fold of data, augment the data to a 5x large dataset by adding 4 separate noises to each data window. Store the downsampled augmented data into a .h5 file.
 
     Parameters
     ----------
     trials: list of arrays with shape (n_electrodes, n_samples, 1)
     labels: list of tuples
+    kinds: list of string : OL vs CL
+    dataset_indexs: list of tuples (which dataset is it from)
     ids_folds: list of list
         It contains num_folds sublist. Each sublist contains the indices of each fold, the number of which is around 1 / num_folds.
     h5_file: str
@@ -323,6 +327,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
     num_noise = config['augmentation']['num_noise']
     detect_artifacts = config['artifact_handling']['detect_artifacts']
     reject_std = config['artifact_handling']['reject_std']
+    include_dataset_index = config['dataset_generator'].get('include_dataset_index',False)
 
     window_size = int(new_samp_freq * window_length / 1000)
     portion = int(0.2 * window_length)
@@ -333,22 +338,25 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         a_trials = [trials[j] for j in ids]
         a_labels = [labels[j] for j in ids]
         a_kinds = [kinds[j] for j in ids]
+        a_dataset_indexs = [dataset_indexs[j] for j in ids]
 
         if len(a_trials) != 0:
             n_electrodes = a_trials[0].shape[0]
         n_train_windows = np.sum([((data.shape[1] - window_length) // stride) + 1 for data in a_trials]) * (1+num_noise)
         dataset1 = file.create_dataset(str(fold)+'_trials', shape=(n_train_windows, n_electrodes, window_size, 1), dtype='float32')
         dataset2 = file.create_dataset(str(fold)+'_labels', shape=(n_train_windows,), dtype='int32')
-        
+        if include_dataset_index: dataset3 = file.create_dataset(str(fold)+'_auxs'  , shape=(n_train_windows,), dtype='int32')
+
         pbar = tqdm.tqdm(range(len(a_labels)))
         pbar.set_description("Augmenting fold " + str(fold))
 
         counter = 0
         artifacts_detected = 0
-        dist = []
+        label_dist = []
+        dataset_index_dist = []
 
         for i in pbar:
-            trial, label, kind = a_trials[i], a_labels[i], a_kinds[i]
+            trial, label, kind, dataset_index = a_trials[i], a_labels[i], a_kinds[i], a_dataset_indexs[i]
             n_samples = trial.shape[1]
 
             # Slide a window on this trial
@@ -379,11 +387,13 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                         window_end += stride
                         continue
                 
-                dist.append(new_label)
+                label_dist.append(new_label)
+                dataset_index_dist.append(dataset_index)
 
                 # save the original data of this window
                 dataset1[counter] = resample(trial_window, window_size, axis=1)
                 dataset2[counter] = new_label
+                if include_dataset_index: dataset3[counter] = dataset_index
                 counter += 1
 
                 # generate 4 different noised data of this window and save
@@ -391,6 +401,7 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
                     noise = np.max(trial_window) * np.random.uniform(-0.5, 0.5, trial_window.shape)
                     dataset1[counter] = resample(trial_window + noise, window_size, axis=1)
                     dataset2[counter] = new_label
+                    if include_dataset_index: dataset3[counter] = dataset_index
                     counter += 1
 
                 window_start += stride
@@ -398,12 +409,16 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
             
         val_trials = file.create_dataset(str(fold)+'_val_trials', data=dataset1[::5])
         val_labels = file.create_dataset(str(fold)+'_val_labels', data=dataset2[::5])
-        label_distribution = np.unique(dist, return_counts=True)
+        if include_dataset_index: val_auxs = file.create_dataset(str(fold)+'_val_auxs', data=dataset3[::5])
+        label_distribution = np.unique(label_dist, return_counts=True)
         if counter == 0: artifact_rejection_percent = 0.
         else: artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1) + artifacts_detected)
 
         print(f'Label distribution in fold {fold}:')
-        print(np.unique(dist,return_counts=True))
+        print(np.unique(label_dist,return_counts=True))
+        if include_dataset_index: 
+            print(f'Dataset Index distribution in fold {fold}:')
+            print(np.unique(dataset_index_dist,return_counts=True))
         print(f'Share of windows rejected as containing artifacts = {artifact_rejection_percent}')
     file.close()
 
@@ -467,13 +482,13 @@ def create_dataset(config, h5_path):
         data_dicts.append([eeg_data, task_data, kind])                                    # store in data_dicts
 
     # Generate the dataset on trial level
-    trials, labels, kinds = dataset_generator.generate_dataset(data_dicts)
+    trials, labels, kinds, dataset_indexs = dataset_generator.generate_dataset(data_dicts)
 
     # Partition data by partitioning the indices
     ids_folds = partition_data(labels, config['partition']['num_folds'])
 
     # Augment dataset according to each fold
-    augment_data_to_file(trials, labels, kinds, ids_folds, h5_path, config)
+    augment_data_to_file(trials, labels, kinds, dataset_indexs, ids_folds, h5_path, config)
 
 
 if __name__ == "__main__":
