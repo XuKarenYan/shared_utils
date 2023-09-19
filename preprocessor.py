@@ -185,7 +185,7 @@ class DataPreprocessor:
 
         return data @ laplacian_next.T
 
-    def normalize_channels(self, data):
+    def normalize_channels(self, data, zero_center=False, skip_samples=2000):
         '''Normalize each channel to have mean 0 and standard deviation 1.
 
         Used during offline function, utilizes mean and standard deviation of 
@@ -194,13 +194,19 @@ class DataPreprocessor:
         Parameters
         ----------
         data: 2-d array with shape (n_samples, n_electrodes)
+        zero_center: If False, a mean of zero is assumed.
+        skip_samples: how many samples to skip when calculating the standard deviation.
 
         Returns
         -------
         data: 2-d array with shape (n_samples, n_electrodes)
         '''
-
-        data = (data - np.mean(data, axis=0)) / np.std(data, axis=0)
+        if zero_center:
+            data = data - np.mean(data, axis=0, keepdims=True)
+        if len(data) < skip_samples:
+            raise ValueError(f'data of length {len(data)} is too short for skip_samples {skip_samples}')
+        std = np.sqrt(np.mean(data[skip_samples:None]**2, axis=0, keepdims=True))
+        data = data / std
         
         return data
 
