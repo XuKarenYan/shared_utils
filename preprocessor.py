@@ -181,7 +181,7 @@ class DataPreprocessor:
         D = len(ch_names)
 
         laplacian_next = np.eye(D) - (next_adjacency / np.maximum(np.sum(next_adjacency, axis=1), 1)).T
-        print("Laplacian applied.")
+        #print("Laplacian applied.")
 
         return data @ laplacian_next.T
 
@@ -299,26 +299,29 @@ class Welfords:
     and np.std(all_data, axis=0)
     """
 
-    def __init__(self, iterable, ddof=1):
+    def __init__(self, iterable, ddof=1, update_mean=False):
         self.size = iterable.shape[1]
         self.ddof = np.full([self.size,], ddof)
         self.n = 0
         self.mean = np.zeros([self.size,])
         self.M2 = np.zeros([self.size,])
         self.include(iterable)
+        self.update_mean = update_mean
 
     def include(self, datum):
         if datum.ndim == 1:
             self.n += 1
             self.delta = datum - self.mean
-            self.mean += self.delta / self.n
+            if self.update_mean:
+                self.mean += self.delta / self.n
             self.M2 += self.delta * (datum - self.mean)
         
         if datum.ndim == 2:
             for i in range(datum.shape[0]):
                 self.n += 1
                 self.delta = datum[i, :] - self.mean
-                self.mean += self.delta / self.n
+                if self.update_mean:
+                    self.mean += self.delta / self.n
                 self.M2 += self.delta * (datum[i, :] - self.mean)
 
     @property
