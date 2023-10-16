@@ -305,8 +305,8 @@ class Welfords:
         self.n = 0
         self.mean = np.zeros([self.size,])
         self.M2 = np.zeros([self.size,])
-        self.include(iterable)
         self.update_mean = update_mean
+        self.include(iterable)
 
     def include(self, datum):
         if datum.ndim == 1:
