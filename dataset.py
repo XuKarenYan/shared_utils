@@ -460,7 +460,10 @@ def create_dataset(config, h5_path):
     # Read in and preprocess the data
     data_dicts = []
     for i, data in enumerate(config['data_names']):
-        kind = utils.decide_kind(data)
+        if 'data_kinds' in config:
+            kind = config['data_kinds'][i] # Used when treating CL datasets as OL
+        else:
+            kind = utils.decide_kind(data)
         eeg_data = utils.read_data_file_to_dict(config['data_dir'] + data + "/eeg.bin")
         task_data = utils.read_data_file_to_dict(config['data_dir'] + data + "/task.bin")
         eeg_data['databuffer'] = preprocessor.preprocess(eeg_data['databuffer'])    # preprocess

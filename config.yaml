@@ -46,6 +46,7 @@ data_preprocessor:
     lowcut: 4                       # the low pass band.
     highcut: 40                     # the high pass band.
     order: 5                        # the order of the filter.
+  zero_center: False
     
 labeling:
   labels_to_keep:
