@@ -4,6 +4,7 @@ from scipy import signal
 import ast
 import random
 import yaml
+from collections import Counter
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
@@ -180,23 +181,120 @@ def read_data_file_to_dict(filename, return_dict=True):
     return data_dict
 
 
-if __name__ == "__main__":
+def detect_artifact(eeg_data,
+                    reject_std=5.5):
+    '''This function checks eeg data for artifacts. In each channel it looks for outliers based on a given mean and 
+    standard deviation for the overall dataset.
 
-    # put in yaml file name as input (i.e config.yaml)
-    yaml_file = sys.argv[1]
-    config = read_config(yaml_file)
+    Note: This function expects to see data which is already normalized
 
-    # Generate model name
-    conn = sqlite3.connect('/data/raspy/sql/sql_eeg.db')
-    model_name = model_namer(conn, train_on_server=True, model_arch_name="EEGNet")
+    eeg data should be a window of eeg data. Should be shape [samples, electrodes].
 
-    # Preprocessing example
-    dataName = '2023-07-22_S1_OL_1_RL'
-    dataDir = '/data/raspy/'
-    eeg_data = read_data_file_to_dict(dataDir + dataName + "/eeg.bin")
-    task_data = read_data_file_to_dict(dataDir + dataName + "/task.bin")
-    kind = decide_kind(dataName)
+    reject_std is the number of standard deviations to allow each channel to vary by. If any data points in a window exceed 
+    this threshold, the window will be marked as containing an artifact.
+    
+    It returns True if an artifact is detected, otherwise False.
+    
+    '''
+    
+    #Set flag for whether this window is bad data
+    bad_window = False
+    #Iterate across all the data points in the data and check if any electrodes exceed rejection threshold
+    for i in range(eeg_data.shape[0]):
+        #If already found bad window, end this loop
+        if bad_window:
+            break
+        #Check each electrode at this timepoint
+        deviations = abs(eeg_data[i,])
+        if any(deviations > reject_std):
+            bad_window = True
 
-    print("kind", kind)
-    print("EEG_Data",eeg_data["databuffer"].shape)
-    print("random model name", model_name)
+    return bad_window
+
+
+def generateLabelWithRotation(task, omitAngles=10):
+    '''Relabel the label for each sample in the close loop experiment according to the relative position between the cursor and the target. Then generate a list of labels for all EEG time steps.
+
+    Parameters
+    ----------
+    task: dict
+    omitAngles: int
+
+    Returns
+    -------
+    label1ms: list
+    '''
+
+    labelAngles = {"left" : [135+omitAngles,-135-omitAngles],
+                    "right" : [-45+omitAngles,45-omitAngles],
+                    "up" : [45+omitAngles,135-omitAngles],
+                    "down" : [-135+omitAngles,-45-omitAngles]}
+
+    label2num = {"left" : 0,
+                "right" : 1,
+                "up" : 2,
+                "down" : 3,
+                "still" : 4}
+
+    poses = task['decoded_pos']
+    targets = task['target_pos']
+    states = task['state_task']
+    targetSize = (0.2,0.2) if 'target_size' not in task else task['target_size'][-100]      # no dataset has this key. 
+
+    length = len(task['target_pos'])
+    labels = np.full(length,-1) # this is where I store the labels
+    dirs = targets - poses  # directions
+    dirsAngles = np.arctan2(dirs[:,1],dirs[:,0]) * 180 / np.pi          # TODO: (x, y) in each dirs, switch to degree
+
+    # 4 cardinal direction
+    invalidFlag = np.geterr()["invalid"] # "warn"
+    np.seterr(invalid='ignore') # ignore warning
+    for label,angle in labelAngles.items():
+        if label=="left":
+            select = (dirsAngles > angle[0]) + (dirsAngles < angle[1])
+        else:
+            select = (dirsAngles > angle[0]) * (dirsAngles < angle[1])
+        labels[select] = label2num[label]
+
+    # still direction
+    if 4 in states: labels[states == 4] = label2num['still']
+
+    # still when inside target
+    posDirs = abs(dirs) 
+    inTarget = (posDirs[:,0] <= targetSize[0]) * (posDirs[:,1] <= targetSize[1])
+    labels[inTarget] = label2num['still']
+
+    np.seterr(invalid = invalidFlag) # go back to original invalid flag: "warn"
+
+    # stretch labels to 1ms 
+    steps = task['eeg_step']
+    label1ms = []
+    for i in range(1,len(steps)):
+        label1ms += [labels[i]] * (steps[i]-steps[i-1])
+    label1ms = np.array(label1ms)
+
+    return label1ms
+
+
+def decideLabelWithRotation(label_window, 
+                            preponderance=0.8,
+                            final_portion=0.2):
+    '''Evaluates a window of a closed loop experiment to determine what final 
+    label should be assigned.
+    
+    Takes in a label_window which should be a list of labels for every ms which represents 
+    the relative position of the cursor to the target in that ms.
+
+    preponderance is the share of labels in the window that must be a single label for 
+    the window to be assigned that label.
+
+    final_portion is used when no label appears more than the preponderance share, 
+    and instead assigns the most common label in the final_portion of the label_window
+    
+    Returns the single label that should be assigned to that window.'''
+    portion = int((1 - final_portion) * len(label_window))
+
+    new_label, label_num = Counter(label_window).most_common(1)[0]
+    if label_num / len(label_window) < 0.8:
+        new_label = Counter(label_window[portion:]).most_common(1)[0][0]
+    return new_label
