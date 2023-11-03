@@ -301,7 +301,6 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
                         new_label = label[0]
                     else:
                         new_label = decideLabelWithRotation(label_window)
-                        #Keep still states in closed loop experiments with rotation
                         if (new_label not in labels_to_keep):
                             window_start += stride
                             window_end += stride
