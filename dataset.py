@@ -2,16 +2,17 @@ import numpy as np
 import h5py
 import tqdm
 from scipy.signal import resample
-from collections import Counter
 import sys
 try:
     # relative path needed if to be used as module
     from .preprocessor import DataPreprocessor
-    from . import utils 
+    from .utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+                        read_config, generateLabelWithRotation, decideLabelWithRotation)
 except ImportError:
     # absolute path selected if to ran as stand alone shared_utils
     from preprocessor import DataPreprocessor
-    import utils
+    from utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+                       read_config, generateLabelWithRotation, decideLabelWithRotation)
 
 
 class DatasetGenerator:
@@ -156,8 +157,10 @@ class DatasetGenerator:
             if self.dataset_operation['selected_labels']:           # use the data with selected labels
                 filtered_trials = [trial for trial, label in zip(trials, labels) if label[0] in self.dataset_operation['selected_labels']]
                 filtered_labels = [label for label in labels if label[0] in self.dataset_operation['selected_labels']]
-            else:                                                   # use all data
-                return trials, labels
+            else: # use all data
+                #Get rid of intertrial period (label -1)
+                filtered_trials = [trial for trial, label in zip(trials, labels) if (label[0] != -1)]
+                filtered_labels = [label for label in labels if (label[0] != -1)]
         else:                                                       # select subset of data at trial level and change labels correspondingly
             mapping = {k: v[index] for k, v in self.dataset_operation['mapped_labels'].items()}
             flattened_mapping = {} # handle case where v is a list
@@ -201,71 +204,6 @@ class DatasetGenerator:
         return all_trials, all_labels, all_kinds
 
 
-
-def generateLabelWithRotation(task, omitAngles=10):
-    '''Relabel the label for each sample in the close loop experiment according to the relative position between the cursor and the target. Then generate a list of labels for all EEG time steps.
-
-    Parameters
-    ----------
-    task: dict
-    omitAngles: int
-
-    Returns
-    -------
-    label1ms: list
-    '''
-
-    labelAngles = {"left" : [135+omitAngles,-135-omitAngles],
-                    "right" : [-45+omitAngles,45-omitAngles],
-                    "up" : [45+omitAngles,135-omitAngles],
-                    "down" : [-135+omitAngles,-45-omitAngles]}
-
-    label2num = {"left" : 0,
-                "right" : 1,
-                "up" : 2,
-                "down" : 3,
-                "still" : 4}
-
-    poses = task['decoded_pos']
-    targets = task['target_pos']
-    states = task['state_task']
-    targetSize = (0.2,0.2) if 'target_size' not in task else task['target_size'][-100]      # no dataset has this key. 
-
-    length = len(task['target_pos'])
-    labels = np.full(length,-1) # this is where I store the labels
-    dirs = targets - poses  # directions
-    dirsAngles = np.arctan2(dirs[:,1],dirs[:,0]) * 180 / np.pi          # TODO: (x, y) in each dirs, switch to degree
-
-    # 4 cardinal direction
-    invalidFlag = np.geterr()["invalid"] # "warn"
-    np.seterr(invalid='ignore') # ignore warning
-    for label,angle in labelAngles.items():
-        if label=="left":
-            select = (dirsAngles > angle[0]) + (dirsAngles < angle[1])
-        else:
-            select = (dirsAngles > angle[0]) * (dirsAngles < angle[1])
-        labels[select] = label2num[label]
-
-    # still direction
-    labels[states == 4] = label2num['still']
-
-    # still when inside target
-    posDirs = abs(dirs) 
-    inTarget = (posDirs[:,0] <= targetSize[0]) * (posDirs[:,1] <= targetSize[1])
-    labels[inTarget] = label2num['still']
-
-    np.seterr(invalid = invalidFlag) # go back to original invalid flag: "warn"
-
-    # stretch labels to 1ms 
-    steps = task['eeg_step']
-    label1ms = []
-    for i in range(1,len(steps)):
-        label1ms += [labels[i]] * (steps[i]-steps[i-1])
-    label1ms = np.array(label1ms)
-
-    return label1ms
-
-
 def partition_data(labels, num_folds):
     '''Partition the indices of the trials into the number of folds. Data of different labels are balanced among folds. NOT partitioning the data of the trials.
     
@@ -297,7 +235,7 @@ def partition_data(labels, num_folds):
 
     return ids_folds
 
-def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TODO
+def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
     '''For each fold of data, augment the data to a 5x large dataset by adding 4 separate noises to each data window. Store the downsampled augmented data into a .h5 file.
 
     Parameters
@@ -327,117 +265,87 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
     window_size = int(new_samp_freq * window_length / 1000)
     portion = int(0.2 * window_length)
     labels_to_keep = set([label[0] for label in labels])
+    #If auto using all labels in dataset and rotation being applied, add still state to list of labels to keep
+    if (not config['dataset_generator']['dataset_operation']['relabel']) and (not config['dataset_generator']['dataset_operation']['selected_labels']) and ('CL' in kinds):
+        labels_to_keep.add(4)
     
-    file = h5py.File(h5_file, 'w')
-    for fold, ids in enumerate(ids_folds):
-        a_trials = [trials[j] for j in ids]
-        a_labels = [labels[j] for j in ids]
-        a_kinds = [kinds[j] for j in ids]
+    with h5py.File(h5_file, 'w') as file:
+        for fold, ids in enumerate(ids_folds):
+            a_trials = [trials[j] for j in ids]
+            a_labels = [labels[j] for j in ids]
+            a_kinds = [kinds[j] for j in ids]
 
-        if len(a_trials) != 0:
-            n_electrodes = a_trials[0].shape[0]
-        n_train_windows = np.sum([((data.shape[1] - window_length) // stride) + 1 for data in a_trials]) * (1+num_noise)
-        dataset1 = file.create_dataset(str(fold)+'_trials', shape=(n_train_windows, n_electrodes, window_size, 1), dtype='float32')
-        dataset2 = file.create_dataset(str(fold)+'_labels', shape=(n_train_windows,), dtype='int32')
-        
-        pbar = tqdm.tqdm(range(len(a_labels)))
-        pbar.set_description("Augmenting fold " + str(fold))
-
-        counter = 0
-        artifacts_detected = 0
-        dist = []
-
-        for i in pbar:
-            trial, label, kind = a_trials[i], a_labels[i], a_kinds[i]
-            n_samples = trial.shape[1]
-
-            # Slide a window on this trial
-            window_start = 0
-            window_end = window_start + window_length
-            while (window_end <= n_samples):
-                trial_window = trial[:, window_start:window_end, :]
-                label_window = label[1][window_start:window_end]
-
-                if kind == 'OL':
-                    new_label = label[0]
-                else:
-                    new_label, label_num = Counter(label_window).most_common(1)[0]
-                    if label_num / len(label_window) < 0.8:
-                        new_label = Counter(label_window[portion:]).most_common(1)[0][0]
-                    if new_label not in labels_to_keep:
-                        window_start += stride
-                        window_end += stride
-                        continue
-                
-                #If detecting artifacts, skip this window if artifact detected
-                if detect_artifacts:
-                    #Reshape data to [samples, electrodes] for artifact detection
-                    if detect_artifact(np.reshape(trial_window, [window_length, n_electrodes]), 
-                                       reject_std):
-                        artifacts_detected += 1
-                        window_start += stride
-                        window_end += stride
-                        continue
-                
-                dist.append(new_label)
-
-                # save the original data of this window
-                dataset1[counter] = resample(trial_window, window_size, axis=1)
-                dataset2[counter] = new_label
-                counter += 1
-
-                # generate 4 different noised data of this window and save
-                for j in range(num_noise):
-                    noise = np.max(trial_window) * np.random.uniform(-0.5, 0.5, trial_window.shape)
-                    dataset1[counter] = resample(trial_window + noise, window_size, axis=1)
-                    dataset2[counter] = new_label
-                    counter += 1
-
-                window_start += stride
-                window_end += stride
+            if len(a_trials) != 0:
+                n_electrodes = a_trials[0].shape[0]
             
-        val_trials = file.create_dataset(str(fold)+'_val_trials', data=dataset1[::5])
-        val_labels = file.create_dataset(str(fold)+'_val_labels', data=dataset2[::5])
-        label_distribution = np.unique(dist, return_counts=True)
-        if counter == 0: artifact_rejection_percent = 0.
-        else: artifact_rejection_percent = artifacts_detected / (counter / (num_noise + 1) + artifacts_detected)
+            pbar = tqdm.tqdm(range(len(a_labels)))
+            pbar.set_description("Augmenting fold " + str(fold))
 
-        print(f'Label distribution in fold {fold}:')
-        print(np.unique(dist,return_counts=True))
-        print(f'Share of windows rejected as containing artifacts = {artifact_rejection_percent}')
-    file.close()
+            clean_counter = 0
+            artifacts_detected = 0
+            trial_data = []
+            dist = []
 
+            for i in pbar:
+                trial, label, kind = a_trials[i], a_labels[i], a_kinds[i]
+                n_samples = trial.shape[1]
 
-def detect_artifact(eeg_data,
-                    reject_std=5.5):
-    '''This function checks eeg data for artifacts. In each channel it looks for outliers based on a given mean and 
-    standard deviation for the overall dataset.
+                # Slide a window on this trial
+                window_start = 0
+                window_end = window_start + window_length
+                while (window_end <= n_samples):
+                    trial_window = trial[:, window_start:window_end, :]
+                    label_window = label[1][window_start:window_end]
 
-    Note: This function expects to see data which is already normalized
+                    if kind == 'OL':
+                        new_label = label[0]
+                    else:
+                        new_label = decideLabelWithRotation(label_window)
+                        if (new_label not in labels_to_keep):
+                            window_start += stride
+                            window_end += stride
+                            continue
+                    
+                    #If detecting artifacts, skip this window if artifact detected
+                    if detect_artifacts:
+                        #Reshape data to [samples, electrodes] for artifact detection
+                        if detect_artifact(np.reshape(trial_window, [window_length, n_electrodes]), 
+                                        reject_std):
+                            artifacts_detected += 1
+                            window_start += stride
+                            window_end += stride
+                            continue
+                    
+                    #Add label and data to lists
+                    dist.append(new_label)
+                    trial_data.append(resample(trial_window, window_size, axis=1))
+                    clean_counter += 1  
 
-    eeg data should be a window of eeg data. Should be shape [samples, electrodes].
+                    # generate noised data of this window and save
+                    for j in range(num_noise):
+                        noise = np.max(trial_window) * np.random.uniform(-0.5, 0.5, trial_window.shape)
+                        trial_data.append(resample(trial_window + noise, window_size, axis=1))
+                        dist.append(new_label)
 
-    reject_std is the number of standard deviations to allow each channel to vary by. If any data points in a window exceed 
-    this threshold, the window will be marked as containing an artifact.
-    
-    It returns True if an artifact is detected, otherwise False.
-    
-    '''
-    
-    #Set flag for whether this window is bad data
-    bad_window = False
-    #Iterate across all the data points in the data and check if any electrodes exceed rejection threshold
-    for i in range(eeg_data.shape[0]):
-        #If already found bad window, end this loop
-        if bad_window:
-            break
-        #Check each electrode at this timepoint
-        deviations = abs(eeg_data[i,])
-        if any(deviations > reject_std):
-            bad_window = True
+                    window_start += stride
+                    window_end += stride
 
-    return bad_window
+            #Convert lists to arrays and save to h5 file
+            eeg_array = np.array(trial_data, dtype=np.float32)
+            label_array = np.array(dist, dtype=np.int32)
+            file.create_dataset(str(fold)+'_trials', data=eeg_array)
+            file.create_dataset(str(fold)+'_labels', data=label_array)    
+            file.create_dataset(str(fold)+'_val_trials', data=eeg_array[::5])
+            file.create_dataset(str(fold)+'_val_labels', data=label_array[::5])
+            
+            label_distribution = np.unique(dist, return_counts=True)
+            if clean_counter == 0: artifact_rejection_percent = 0.
+            else: artifact_rejection_percent = artifacts_detected / (clean_counter + artifacts_detected)
 
+            print(f'Label distribution in fold {fold}:')
+            print(np.unique(dist,return_counts=True))
+            print(f'Share of windows rejected as containing artifacts = {artifact_rejection_percent}')
+        
             
 def create_dataset(config, h5_path):
     '''creates dataset as h5 file according to yaml_file and stores it at path given by h5_path
@@ -463,9 +371,9 @@ def create_dataset(config, h5_path):
         if 'data_kinds' in config:
             kind = config['data_kinds'][i] # Used when treating CL datasets as OL
         else:
-            kind = utils.decide_kind(data)
-        eeg_data = utils.read_data_file_to_dict(config['data_dir'] + data + "/eeg.bin")
-        task_data = utils.read_data_file_to_dict(config['data_dir'] + data + "/task.bin")
+            kind = decide_kind(data)
+        eeg_data = read_data_file_to_dict(config['data_dir'] + data + "/eeg.bin")
+        task_data = read_data_file_to_dict(config['data_dir'] + data + "/task.bin")
         eeg_data['databuffer'] = preprocessor.preprocess(eeg_data['databuffer'])    # preprocess
         data_dicts.append([eeg_data, task_data, kind])                                    # store in data_dicts
 
@@ -483,7 +391,7 @@ if __name__ == "__main__":
 
     # put in yaml file name as input (i.e config.yaml)
     yaml_path = sys.argv[1]
-    config = utils.read_config(yaml_path)
+    config = read_config(yaml_path)
 
     create_dataset(config, h5_path="./sampleDataset.h5")
     print(f"created sample dataset: sampleDataset.h5")

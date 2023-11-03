@@ -1,11 +1,13 @@
 import numpy as np
-from scipy.signal import butter
-from scipy import signal
-import sys
+from scipy.signal import butter, resample, filtfilt
 try:
-    from . import utils
-except:
-    import utils
+    # relative path needed if to be used as module
+    from .utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+                        read_config, generateLabelWithRotation, decideLabelWithRotation)
+except ImportError:
+    # absolute path selected if to run as stand alone shared_utils
+    from utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+                       read_config, generateLabelWithRotation, decideLabelWithRotation)
 
 class DataPreprocessor:
     '''This preprocessor handles the general preprocessing work, including dropping channels, several filtering, and normalization.
@@ -36,7 +38,9 @@ class DataPreprocessor:
         self.order = config['bandpass_filter']['order']
         self.sf = config['sampling_frequency']
         self.online_status = config['online_status']
-        self.normalizer_type = config['normalizer_type']
+        self.normalizer_type = config['closed_loop_settings']['normalizer_type']
+        self.zero_center = bool(config.get('zero_center', True)) # True if subtracting the mean of data 
+        self.skip_samples = config['skip_samples']
         self.first_run = True
         self.zero_center = bool(config.get('zero_center', True)) # True if subtracting the mean of data. Only applies to offline and Welfords, NOT running_mean.
 
@@ -128,7 +132,7 @@ class DataPreprocessor:
             low = lowcut / nyq
             high = highcut / nyq
             b, a = butter(order, [low, high], btype='band')
-            y = signal.filtfilt(b, a, data)
+            y = filtfilt(b, a, data)
             return y
         
         for electrode_ix in range(data.shape[1]):
@@ -147,46 +151,47 @@ class DataPreprocessor:
         -------
         data: 2-d array with shape (n_samples, n_electrodes)
         '''
+        try:
+            self.laplacian_next
+        except:
+            # Get labels and coordinates of all channels for cap type
+            ch_names, coords = self.get_electrode_position()
+            GRIDSHAPE = (max([coord[1] for coord in coords])+1, max([coord[0] for coord in coords])+1)
+            
+            # Drop assigned channels
+            ch_names, coords = zip(*[(ch_name, coord) for ch_name, coord in zip(ch_names, coords) if ch_name not in self.ch_to_drop])
 
-        # Get labels and coordinates of all channels for cap type
-        ch_names, coords = self.get_electrode_position()
-        GRIDSHAPE = (max([coord[1] for coord in coords])+1, max([coord[0] for coord in coords])+1)
-        
-        # Drop assigned channels
-        ch_names, coords = zip(*[(ch_name, coord) for ch_name, coord in zip(ch_names, coords) if ch_name not in self.ch_to_drop])
+            # Fill in each electrode (by order) into grid
+            inds_grid = np.empty(GRIDSHAPE, dtype='int') * np.nan
+            for i, ind in enumerate(coords):
+                inds_grid[ind[1], ind[0]] = i
 
-        # Fill in each electrode (by order) into grid
-        inds_grid = np.empty(GRIDSHAPE, dtype='int') * np.nan
-        for i, ind in enumerate(coords):
-            inds_grid[ind[1], ind[0]] = i
+            # List neighboring electrodes for each electrode in four directions (with distance 2)
+            neighbors = []
+            for i, ind in enumerate(coords):
+                iy, ix = ind
+                neighbors_i = []
+                if ix > 1 and ~np.isnan(inds_grid[ix-2, iy]):
+                    neighbors_i.append(int(inds_grid[ix-2, iy]))
+                if ix < GRIDSHAPE[0]-2 and ~np.isnan(inds_grid[ix+2, iy]):
+                    neighbors_i.append(int(inds_grid[ix+2, iy]))
+                if iy > 1 and ~np.isnan(inds_grid[ix, iy-2]):
+                    neighbors_i.append(int(inds_grid[ix, iy-2]))
+                if iy < GRIDSHAPE[1]-2 and ~np.isnan(inds_grid[ix, iy+2]):
+                    neighbors_i.append(int(inds_grid[ix, iy+2]))
+                neighbors.append(neighbors_i)
 
-        # List neighboring electrodes for each electrode in four directions (with distance 2)
-        neighbors = []
-        for i, ind in enumerate(coords):
-            iy, ix = ind
-            neighbors_i = []
-            if ix > 1 and ~np.isnan(inds_grid[ix-2, iy]):
-                neighbors_i.append(int(inds_grid[ix-2, iy]))
-            if ix < GRIDSHAPE[0]-2 and ~np.isnan(inds_grid[ix+2, iy]):
-                neighbors_i.append(int(inds_grid[ix+2, iy]))
-            if iy > 1 and ~np.isnan(inds_grid[ix, iy-2]):
-                neighbors_i.append(int(inds_grid[ix, iy-2]))
-            if iy < GRIDSHAPE[1]-2 and ~np.isnan(inds_grid[ix, iy+2]):
-                neighbors_i.append(int(inds_grid[ix, iy+2]))
-            neighbors.append(neighbors_i)
+            # Create row for each electrode indicating all neighbors
+            next_adjacency = np.zeros((len(ch_names), len(ch_names)))
+            for i, neighbors_i in enumerate(neighbors):
+                next_adjacency[i, neighbors_i] = 1
+            D = len(ch_names)
 
-        # Create row for each electrode indicating all neighbors
-        next_adjacency = np.zeros((len(ch_names), len(ch_names)))
-        for i, neighbors_i in enumerate(neighbors):
-            next_adjacency[i, neighbors_i] = 1
-        D = len(ch_names)
+            self.laplacian_next = np.eye(D) - (next_adjacency / np.maximum(np.sum(next_adjacency, axis=1), 1)).T
 
-        laplacian_next = np.eye(D) - (next_adjacency / np.maximum(np.sum(next_adjacency, axis=1), 1)).T
-        #print("Laplacian applied.")
+        return data @ self.laplacian_next.T
 
-        return data @ laplacian_next.T
-
-    def normalize_channels(self, data, zero_center=False, skip_samples=2000):
+    def normalize_channels(self, data):
         '''Normalize each channel to have mean 0 and standard deviation 1.
 
         Used during offline function, utilizes mean and standard deviation of 
@@ -195,18 +200,18 @@ class DataPreprocessor:
         Parameters
         ----------
         data: 2-d array with shape (n_samples, n_electrodes)
-        zero_center: If False, a mean of zero is assumed.
+        zero_center: If False, a mean of zero is assumed to already exist in the data (e.g., when already bandpass filtered).
         skip_samples: how many samples to skip when calculating the standard deviation.
 
         Returns
         -------
         data: 2-d array with shape (n_samples, n_electrodes)
         '''
-        if zero_center:
+        if self.zero_center:
             data = data - np.mean(data, axis=0, keepdims=True)
-        if len(data) < skip_samples:
-            raise ValueError(f'data of length {len(data)} is too short for skip_samples {skip_samples}')
-        std = np.sqrt(np.mean(data[skip_samples:None]**2, axis=0, keepdims=True))
+        if len(data) < self.skip_samples:
+            raise ValueError(f'data of length {len(data)} is too short for skip_samples {self.skip_samples}')
+        std = np.sqrt(np.mean(data[self.skip_samples:None]**2, axis=0, keepdims=True))
         data = data / std
         
         return data
@@ -263,7 +268,7 @@ class DataPreprocessor:
         # Normalize channels
         #If running offline, utilize mean and std dev of all data to normalize
         if self.online_status == 'offline':
-            data = self.normalize_channels(data, zero_center=self.zero_center)
+            data = self.normalize_channels(data)
         #If online, normalize with data collected up to this point in time
         if self.online_status == 'online':
             #Check if data buffer not yet filled. If not, return data unaltered
@@ -277,12 +282,12 @@ class DataPreprocessor:
                 elif self.normalizer_type == 'running_mean':
                     self.normalizer = Running_Mean(data)
                 else:
-                    raise ValueError("no such noramlizer as:", self.normalizer)
+                    raise ValueError("no such normalizer as:", self.normalizer)
                 self.first_run == False
-            else:
-                self.normalizer(data)
             #Normalize this sample
-            data = ((data-self.normalizer.mean) / self.normalizer.std)
+            if self.zero_center:
+                data = data - self.normalizer.mean
+            data = data / self.normalizer.std
 
         return data
 
@@ -300,29 +305,26 @@ class Welfords:
     and np.std(all_data, axis=0)
     """
 
-    def __init__(self, iterable, ddof=1, update_mean=False):
+    def __init__(self, iterable, ddof=1):
         self.size = iterable.shape[1]
         self.ddof = np.full([self.size,], ddof)
         self.n = 0
         self.mean = np.zeros([self.size,])
         self.M2 = np.zeros([self.size,])
-        self.update_mean = update_mean
         self.include(iterable)
 
     def include(self, datum):
         if datum.ndim == 1:
             self.n += 1
             self.delta = datum - self.mean
-            if self.update_mean:
-                self.mean += self.delta / self.n
+            self.mean += self.delta / self.n
             self.M2 += self.delta * (datum - self.mean)
         
         if datum.ndim == 2:
             for i in range(datum.shape[0]):
                 self.n += 1
                 self.delta = datum[i, :] - self.mean
-                if self.update_mean:
-                    self.mean += self.delta / self.n
+                self.mean += self.delta / self.n
                 self.M2 += self.delta * (datum[i, :] - self.mean)
 
     @property
@@ -360,18 +362,3 @@ class Running_Mean:
         std = np.std(data, 0)
         self.mean = (self.mean * self.momentum) + ((1-self.momentum) * mean)
         self.std = (self.std * self.momentum) + ((1-self.momentum) * std)
-
-
-if __name__ == "__main__":
-
-    # put in yaml file name as input (i.e config.yaml)
-    yaml_file = sys.argv[1]
-    config = utils.read_config(yaml_file)
-
-    # Preprocessing example
-    data_file = '/data/raspy/2023-07-22_S1_OL_1_RL/eeg.bin'
-    eeg_data = utils.read_data_file_to_dict(data_file)
-    preprocessor = DataPreprocessor(config['data_preprocessor'])
-    preprocessed_data = preprocessor.preprocess(eeg_data['databuffer'])    # preprocess
-
-    print("preprocessed",preprocessed_data.shape)
