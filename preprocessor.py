@@ -278,7 +278,7 @@ class DataPreprocessor:
             #Instantiate normalization object if needed
             if self.first_run:
                 if self.normalizer_type == 'welfords':
-                    self.normalizer = Welfords(data, update_mean=self.zero_center) # don't update the mean if not zero-centering
+                    self.normalizer = Welfords(data)
                 elif self.normalizer_type == 'running_mean':
                     self.normalizer = Running_Mean(data)
                 else:
