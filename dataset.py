@@ -83,6 +83,8 @@ class DatasetGenerator:
         eeg_starts = task_data['eeg_step'][task_starts]
         eeg_starts = np.where(eeg_starts==-1, 0, eeg_starts)
         eeg_ends = task_data['eeg_step'][task_ends]
+        
+        eeg_starts = eeg_starts + int(self.first_ms_to_drop)
 
         # prepare to filter selected_seconds (first print how many seconds is in data)
         start_times_by_trial = (eeg_data['time_ns'][eeg_starts] - eeg_data['time_ns'][0]) / (10**9)
@@ -91,7 +93,7 @@ class DatasetGenerator:
 
         for idx in range(len(task_starts)):
             # drop trials that are too short for the model to train on
-            if int(eeg_ends[idx] - eeg_starts[idx] - self.first_ms_to_drop) < self.window_length:
+            if int(eeg_ends[idx] - eeg_starts[idx]) < self.window_length:
                 if for_mne:
                     del game_states[idx]
                 continue
@@ -208,7 +210,7 @@ def generateLabelWithRotation(task, omitAngles=10):
     Parameters
     ----------
     task: dict
-    omitAngles: int
+    omitAngles: int, 0 <= omitAngles < 45
 
     Returns
     -------
@@ -340,8 +342,12 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):#TOD
         dataset1 = file.create_dataset(str(fold)+'_trials', shape=(n_train_windows, n_electrodes, window_size, 1), dtype='float32')
         dataset2 = file.create_dataset(str(fold)+'_labels', shape=(n_train_windows,), dtype='int32')
         
-        pbar = tqdm.tqdm(range(len(a_labels)))
-        pbar.set_description("Augmenting fold " + str(fold))
+        verbosity = 1 # to-do: add to function call
+        if verbosity > 0:
+            pbar = tqdm.tqdm(range(len(a_labels)))
+            pbar.set_description("Augmenting fold " + str(fold))
+        else:
+            verbosity = range(len(a_labels))
 
         counter = 0
         artifacts_detected = 0
@@ -460,7 +466,10 @@ def create_dataset(config, h5_path):
     # Read in and preprocess the data
     data_dicts = []
     for i, data in enumerate(config['data_names']):
-        kind = utils.decide_kind(data)
+        if 'data_kinds' in config:
+            kind = config['data_kinds'][i] # Used when treating CL datasets as OL
+        else:
+            kind = utils.decide_kind(data)
         eeg_data = utils.read_data_file_to_dict(config['data_dir'] + data + "/eeg.bin")
         task_data = utils.read_data_file_to_dict(config['data_dir'] + data + "/task.bin")
         eeg_data['databuffer'] = preprocessor.preprocess(eeg_data['databuffer'])    # preprocess
@@ -474,7 +483,7 @@ def create_dataset(config, h5_path):
 
     # Augment dataset according to each fold
     augment_data_to_file(trials, labels, kinds, ids_folds, h5_path, config)
-
+    print('created dataset', h5_path)
 
 if __name__ == "__main__":
 

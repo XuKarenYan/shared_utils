@@ -11,6 +11,16 @@ except ImportError:
 import pandas as pd
 import sqlite3
 
+class DumperWithIndent(yaml.Dumper):
+    '''https://stackoverflow.com/questions/25108581/python-yaml-dump-bad-indentation
+    Indents list item lines
+    '''
+    def increase_indent(self, flow=False, indentless=False):
+        return super(DumperWithIndent, self).increase_indent(flow, False)
+def dump_to_yaml(yaml_data, fname):
+    with open(fname, 'w') as f:
+        yaml.dump(yaml_data, f, Dumper=DumperWithIndent, default_flow_style=False, sort_keys=False)
+    return
 
 def model_namer(sql_conn, train_on_server, model_arch_name):
     '''Generates a unique two word name based on the inbuilt unix dictionary. 

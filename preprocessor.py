@@ -38,6 +38,7 @@ class DataPreprocessor:
         self.online_status = config['online_status']
         self.normalizer_type = config['normalizer_type']
         self.first_run = True
+        self.zero_center = bool(config.get('zero_center', True)) # True if subtracting the mean of data. Only applies to offline and Welfords, NOT running_mean.
 
     def get_electrode_position(self):
         '''Get electrode names and grid coordinates for different cap types.
@@ -262,7 +263,7 @@ class DataPreprocessor:
         # Normalize channels
         #If running offline, utilize mean and std dev of all data to normalize
         if self.online_status == 'offline':
-            data = self.normalize_channels(data)
+            data = self.normalize_channels(data, zero_center=self.zero_center)
         #If online, normalize with data collected up to this point in time
         if self.online_status == 'online':
             #Check if data buffer not yet filled. If not, return data unaltered
@@ -272,7 +273,7 @@ class DataPreprocessor:
             #Instantiate normalization object if needed
             if self.first_run:
                 if self.normalizer_type == 'welfords':
-                    self.normalizer = Welfords(data)
+                    self.normalizer = Welfords(data, update_mean=self.zero_center) # don't update the mean if not zero-centering
                 elif self.normalizer_type == 'running_mean':
                     self.normalizer = Running_Mean(data)
                 else:
