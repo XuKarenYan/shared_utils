@@ -79,9 +79,9 @@ class PreprocessLikeClosedLoop:
         
         #For closed loop experiments, generate label every ms of data
         if 'data_kinds' in self.config:
-            kind = config['data_kinds'][0] # Used when treating CL datasets as OL
+            kind = self.config['data_kinds'][0] # Used when treating CL datasets as OL
         else:
-            kind = decide_kind(self.data_name)
+            kind = self.decide_kind(self.data_name)
         if kind == 'CL':
             trial_labels_in_ms = generateLabelWithRotation(task_data, self.omit_angles)
 
@@ -102,7 +102,7 @@ class PreprocessLikeClosedLoop:
         bad_labels = [-1]
         #Add other labels we want to exclude to bad labels
         if self.labels_to_keep != ['all']:
-            also_bad = [label for label in all_labels.list() if label not in labels_to_keep]
+            also_bad = [label for label in all_labels.tolist() if label not in self.labels_to_keep]
             bad_labels = bad_labels + also_bad
 
 
@@ -156,6 +156,11 @@ class PreprocessLikeClosedLoop:
                 #Check if label in bad_labels; if so move to next tick
                 if label in bad_labels:
                     continue
+
+                #If keeping only first 2 seconds of each trial, assume 20ms ticks and overwrite label to drop
+                if kind == 'first2sec' and len(eeg_trial_labels) > 100:
+                    if (label == eeg_trial_labels[-1]) and (len({ele[0] for ele in eeg_trial_labels[-100:]}) == 1):
+                        continue
                 
                 #Relabel this window if needed
                 if self.relabel_pairs != [None]:
@@ -180,4 +185,5 @@ class PreprocessLikeClosedLoop:
 
         #Return share of ticks rejected as artifacts, eeg_data, and labels
         print(f'Share of trials that were rejected as artifacts = {artifact_percent}')
+        print(f'Label distribution: {np.unique(eeg_trial_labels, return_counts=True)}')
         return artifact_percent, eeg_trials, eeg_trial_labels

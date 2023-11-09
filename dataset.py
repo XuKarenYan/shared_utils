@@ -334,9 +334,10 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
             eeg_array = np.array(trial_data, dtype=np.float32)
             label_array = np.array(dist, dtype=np.int32)
             file.create_dataset(str(fold)+'_trials', data=eeg_array)
-            file.create_dataset(str(fold)+'_labels', data=label_array)    
-            file.create_dataset(str(fold)+'_val_trials', data=eeg_array[::5])
-            file.create_dataset(str(fold)+'_val_labels', data=label_array[::5])
+            file.create_dataset(str(fold)+'_labels', data=label_array)
+            #Only take non augmented / noisy windows into validation data    
+            file.create_dataset(str(fold)+'_val_trials', data=eeg_array[::num_noise+1])
+            file.create_dataset(str(fold)+'_val_labels', data=label_array[::num_noise+1])
             
             label_distribution = np.unique(dist, return_counts=True)
             if clean_counter == 0: artifact_rejection_percent = 0.
