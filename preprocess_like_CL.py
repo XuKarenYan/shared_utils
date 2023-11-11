@@ -79,7 +79,7 @@ class PreprocessLikeClosedLoop:
         
         #For closed loop experiments, generate label every ms of data
         if 'data_kinds' in self.config:
-            kind = config['data_kinds'][0] # Used when treating CL datasets as OL
+            kind = self.config['data_kinds'][0] # Used when treating CL datasets as OL
         else:
             kind = decide_kind(self.data_name)
         if kind == 'CL':
