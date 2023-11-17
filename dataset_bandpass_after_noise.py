@@ -262,6 +262,10 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
     detect_artifacts = config['artifact_handling']['detect_artifacts']
     reject_std = config['artifact_handling']['reject_std']
 
+    #Change config to turn bandpass on and create new preprocessor object
+    config['data_preprocessor']['bandpass_filter']['apply'] = True
+    noise_bandpasser = DataPreprocessor(config['data_preprocessor'])
+    
     window_size = int(new_samp_freq * window_length / 1000)
     portion = int(0.2 * window_length)
     labels_to_keep = set([label[0] for label in labels])
@@ -324,8 +328,14 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
                     # generate noised data of this window and save
                     for j in range(num_noise):
                         noise = np.max(trial_window) * np.random.uniform(-0.5, 0.5, trial_window.shape)
-                        
-                        trial_data.append(resample(trial_window + noise, window_size, axis=1))
+                        noisy_data = trial_window + noise
+                        #Reshape for bandpass
+                        noisy_data = np.squeeze(noisy_data).transpose(1, 0)
+                        #bandpass the data
+                        bp_data = noise_bandpasser.bandpass_channels(noisy_data)
+                        #Reshape again
+                        bp_data = np.expand_dims(bp_data.transpose(1, 0), 2)
+                        trial_data.append(resample(bp_data, window_size, axis=1))
                         dist.append(new_label)
 
                     window_start += stride
