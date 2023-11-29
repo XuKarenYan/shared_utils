@@ -11,6 +11,8 @@ except ImportError:
     from yaml import Loader, Dumper
 import pandas as pd
 import sqlite3
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
 
 
 def model_namer(sql_conn, train_on_server, model_arch_name):
