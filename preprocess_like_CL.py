@@ -70,7 +70,9 @@ class PreprocessLikeClosedLoop:
         tick an processes it using only data available at that point in time.
 
         eeg_data and task_data should be dictionaries extracted from a data file 
-        using read_data_file_to_dict'''
+        using read_data_file_to_dict
+        
+        Outputs data in shape [trials, samples, electrodes]'''
 
         #Generate eeg and task data dictionaries for test dataset
         data_path = self.data_dir + self.data_name
@@ -179,7 +181,7 @@ class PreprocessLikeClosedLoop:
         total_ticks = len(eeg_trials) + artifact_counter
         artifact_percent = artifact_counter / total_ticks
         
-        #Convert data and labels to arrays
+        #Convert data and labels to arrays, eeg_trials of shape [trials, samples, electrodes]
         eeg_trials = np.array(eeg_trials)
         eeg_trial_labels = np.array(eeg_trial_labels)
 
