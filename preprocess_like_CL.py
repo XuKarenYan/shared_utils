@@ -64,16 +64,23 @@ class PreprocessLikeClosedLoop:
         self.data_name = config['data_names'][0]
         if len(config['data_names']) > 1: print(f'This class only designed to work on one dataset at a time. Proceeding using first data name provided., {self.data_name}')
 
-    def generate_dataset(self):
+    def generate_dataset(self, data_name=None, data_dir=None):
         '''This function preprocesses data in the same way it happens online in a 
         closed loop experiment. In other words, it iterates over the data tick by 
         tick an processes it using only data available at that point in time.
 
-        eeg_data and task_data should be dictionaries extracted from a data file 
-        using read_data_file_to_dict
+        data_name should be a folder name where the data to process like raspy is located. If not provided, uses the data name in the config
+        
+        data_dir should be the path to the directory where that data_name folder is located. If not provided, uses the value in the config
         
         Outputs data in shape [trials, samples, electrodes]'''
 
+        #Overwrite parts of config with the dataset info we want to test on
+        if data_name:
+            self.data_name = data_name
+        if data_dir:
+            self.data_dir = data_dir
+        
         #Generate eeg and task data dictionaries for test dataset
         data_path = self.data_dir + self.data_name
         eeg_data = read_data_file_to_dict(data_path + "/eeg.bin")
