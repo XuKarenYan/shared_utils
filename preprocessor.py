@@ -226,7 +226,7 @@ class DataPreprocessor:
         This function is intended to be used as part of closed loop preprocessing.'''
         
         #Test if any ticks contain all 0s, indicating buffers still filling
-        if np.any(np.all(data==0, axis=0)):
+        if np.any(np.all(data==0, axis=1)):
             return True
         else:
             return False

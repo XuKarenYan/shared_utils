@@ -136,6 +136,8 @@ class PreprocessLikeClosedLoop:
                 if self.detect_artifacts:
                     artifact = detect_artifact(data,
                                             reject_std=self.reject_std)
+                #If passed initial ticks, include this data in running normalizer calcs of mean and std
+                preprocessor.normalizer.include(data)
             #If artifact detected, move on to next window
             if artifact:
                 artifact_counter += 1
@@ -143,9 +145,6 @@ class PreprocessLikeClosedLoop:
             
             #Else no artifact; add data to normalizer and get label
             else:
-                #If passed initial ticks, include this data in running normalizer calcs of mean and std
-                if self.initial_ticks <= 0:
-                    preprocessor.normalizer.include(data)
 
                 #Get label for this tick
                 if kind == 'CL':
