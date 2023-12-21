@@ -308,9 +308,8 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
                     
                     #If detecting artifacts, skip this window if artifact detected
                     if detect_artifacts:
-                        #Reshape data to [samples, electrodes] for artifact detection
-                        if detect_artifact(np.reshape(trial_window, [window_length, n_electrodes]), 
-                                        reject_std):
+                        if detect_artifact(trial_window, 
+                                           reject_std):
                             artifacts_detected += 1
                             window_start += stride
                             window_end += stride
