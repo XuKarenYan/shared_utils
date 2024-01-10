@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.signal import butter, resample, filtfilt
+from pyriemann.utils.base import invsqrtm
 try:
     # relative path needed if to be used as module
     from .utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
@@ -225,7 +226,7 @@ class DataPreprocessor:
         This function is intended to be used as part of closed loop preprocessing.'''
         
         #Test if any ticks contain all 0s, indicating buffers still filling
-        if np.any(np.all(data==0, axis=0)):
+        if np.any(np.all(data==0, axis=1)):
             return True
         else:
             return False
@@ -362,3 +363,42 @@ class Running_Mean:
         std = np.std(data, 0)
         self.mean = (self.mean * self.momentum) + ((1-self.momentum) * mean)
         self.std = (self.std * self.momentum) + ((1-self.momentum) * std)
+
+
+class Iterative_Whitener():
+    '''Object designed to whiten covariance matrices tick by tick,
+    eg during closed loop experiments or when simulating closed loop.
+    
+    Takes in a square covariance matrix of shape (1, electrodes, electrodes).
+    Returns a whitened matrix of shape (electrodes, electrodes).
+    
+    This is based on pyriemann.preprocessing.Whitening using the euclidean setting
+    
+    It is designed to be initialized before use, and then to be called with the .fit_transform method on each tick
+    
+    On each tick it adds that ticks data to the ongoing estimator and then uses the estimator to transform that ticks data'''
+    
+    def __init__(self):
+        self.tick_count = 0
+        
+    def fit_transform(self, tick_data):
+        #Check that tick_data conforms to correct shape of (1, electrodes, electrodes)
+        if (len(tick_data.shape) != 3) or (tick_data.shape[0] != 1) or (tick_data.shape[1] > 66) or (tick_data.shape[1] != tick_data.shape[2]):
+            raise ValueError("Data must be covariance matrix of shape (1, electrodes, electrodes)")
+        
+        self.tick_count += 1
+        #Remove empty first dimension
+        tick_data = np.squeeze(tick_data, axis=0)
+        
+        #Calculate running average
+        if self.tick_count == 1:
+            self.mean = tick_data
+        else:
+            delta = tick_data - self.mean
+            self.mean += (delta / self.tick_count)
+            
+        #Create filter based on matrix square root of average
+        filter_ = invsqrtm(self.mean)
+        #Return filtered data
+        tick_data = np.expand_dims(tick_data, 0)
+        return filter_.T @ tick_data @ filter_

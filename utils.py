@@ -185,12 +185,11 @@ def read_data_file_to_dict(filename, return_dict=True):
 
 def detect_artifact(eeg_data,
                     reject_std=5.5):
-    '''This function checks eeg data for artifacts. In each channel it looks for outliers based on a given mean and 
-    standard deviation for the overall dataset.
+    '''This function checks eeg data for artifacts. If any element in the data exceeds the standard deviation threshold, it returns True.
 
     Note: This function expects to see data which is already normalized
 
-    eeg data should be a window of eeg data. Should be shape [samples, electrodes].
+    eeg data should be a window of eeg data.
 
     reject_std is the number of standard deviations to allow each channel to vary by. If any data points in a window exceed 
     this threshold, the window will be marked as containing an artifact.
@@ -199,17 +198,8 @@ def detect_artifact(eeg_data,
     
     '''
     
-    #Set flag for whether this window is bad data
-    bad_window = False
-    #Iterate across all the data points in the data and check if any electrodes exceed rejection threshold
-    for i in range(eeg_data.shape[0]):
-        #If already found bad window, end this loop
-        if bad_window:
-            break
-        #Check each electrode at this timepoint
-        deviations = abs(eeg_data[i,])
-        if any(deviations > reject_std):
-            bad_window = True
+    #Check if any element in the data array exceeds standard dev threshold
+    bad_window = np.any(np.fabs(eeg_data) > reject_std)
 
     return bad_window
 
