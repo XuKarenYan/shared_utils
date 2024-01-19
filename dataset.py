@@ -6,12 +6,12 @@ import sys
 try:
     # relative path needed if to be used as module
     from .preprocessor import DataPreprocessor
-    from .utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+    from .utils import (read_data_file_to_dict, ArtifactTuner, decide_kind, 
                         read_config, generateLabelWithRotation, decideLabelWithRotation)
 except ImportError:
     # absolute path selected if to ran as stand alone shared_utils
     from preprocessor import DataPreprocessor
-    from utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+    from utils import (read_data_file_to_dict, ArtifactTuner, decide_kind, 
                        read_config, generateLabelWithRotation, decideLabelWithRotation)
 
 
@@ -268,6 +268,9 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
     #If auto using all labels in dataset and rotation being applied, add still state to list of labels to keep
     if (not config['dataset_generator']['dataset_operation']['relabel']) and (not config['dataset_generator']['dataset_operation']['selected_labels']) and ('CL' in kinds):
         labels_to_keep.add(4)
+
+    if detect_artifacts:
+        artifact_detector = ArtifactTuner(config['artifact_handling'])
     
     with h5py.File(h5_file, 'w') as file:
         for fold, ids in enumerate(ids_folds):
@@ -308,8 +311,8 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
                     
                     #If detecting artifacts, skip this window if artifact detected
                     if detect_artifacts:
-                        if detect_artifact(trial_window, 
-                                           reject_std):
+                        artifact = artifact_detector.detect_artifact(trial_window)
+                        if artifact:
                             artifacts_detected += 1
                             window_start += stride
                             window_end += stride
@@ -374,7 +377,12 @@ def create_dataset(config, h5_path):
             kind = decide_kind(data)
         eeg_data = read_data_file_to_dict(config['data_dir'] + data + "/eeg.bin")
         task_data = read_data_file_to_dict(config['data_dir'] + data + "/task.bin")
-        eeg_data['databuffer'] = preprocessor.preprocess(eeg_data['databuffer'])    # preprocess
+        #databuffer is already bandpass filtered in raspy and should be used by default. eegbuffersignal is raw data
+        use_eegbuffersignal = config.get('data_preprocessor', {}).get('use_eegbuffersignal', False)
+        if use_eegbuffersignal:
+            eeg_data['databuffer'] = preprocessor.preprocess(eeg_data['eegbuffersignal'])    # preprocess
+        else:
+            eeg_data['databuffer'] = preprocessor.preprocess(eeg_data['databuffer'])    # preprocess
         data_dicts.append([eeg_data, task_data, kind])                                    # store in data_dicts
 
     # Generate the dataset on trial level

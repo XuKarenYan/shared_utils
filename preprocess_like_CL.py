@@ -4,12 +4,12 @@ import sys
 import tqdm
 try:
     # relative path needed if to be used as module
-    from .utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+    from .utils import (read_data_file_to_dict, ArtifactTuner, decide_kind, 
                         read_config, generateLabelWithRotation, decideLabelWithRotation)
     from .preprocessor import DataPreprocessor
 except ImportError:
     # absolute path selected if to run as stand alone shared_utils
-    from utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+    from utils import (read_data_file_to_dict, ArtifactTuner, decide_kind, 
                        read_config, generateLabelWithRotation, decideLabelWithRotation)
     from preprocessor import DataPreprocessor
 
@@ -96,6 +96,8 @@ class PreprocessLikeClosedLoop:
 
         #Instantiate preprocessor to drop channels, laplacian filter, and normalize data
         preprocessor = DataPreprocessor(self.config['data_preprocessor'])
+        #Instantiate artifact detector
+        artifact_detector = ArtifactTuner(self.config['artifact_handling'])
         
         #Create empty lists to hold the data we will return from function
         eeg_trials = []  # will hold each trial of eeg data
@@ -143,16 +145,17 @@ class PreprocessLikeClosedLoop:
             if self.initial_ticks <= 0:
                 #If detecting artifacts, do so
                 if self.detect_artifacts:
-                    artifact = detect_artifact(data,
-                                            reject_std=self.reject_std)
+                    artifact = artifact_detector.detect_artifact(data)
                 #If passed initial ticks, include this data in running normalizer calcs of mean and std
                 preprocessor.normalizer.include(data)
-            #If artifact detected, move on to next window
+            #If artifact detected, use most recently decoded data and label (to simulate cursor maintaining direction online when artifact detected)
             if artifact:
                 artifact_counter += 1
+                eeg_trials.append(eeg_trials[-1])
+                eeg_trial_labels.append(eeg_trial_labels[-1])
                 continue
             
-            #Else no artifact; add data to normalizer and get label
+            #Else no artifact; resample and get label
             else:
 
                 #Get label for this tick
@@ -183,8 +186,8 @@ class PreprocessLikeClosedLoop:
                 eeg_trials.append(data)
                 eeg_trial_labels.append(label)
     
-        #Calculate share of ticks rejected as artifacts
-        total_ticks = len(eeg_trials) + artifact_counter
+        #Calculate share of ticks flagged as artifacts
+        total_ticks = len(eeg_trials)
         artifact_percent = artifact_counter / total_ticks
         
         #Convert data and labels to arrays, eeg_trials of shape [trials, samples, electrodes]
@@ -192,6 +195,6 @@ class PreprocessLikeClosedLoop:
         eeg_trial_labels = np.array(eeg_trial_labels)
 
         #Return share of ticks rejected as artifacts, eeg_data, and labels
-        print(f'Share of trials that were rejected as artifacts = {artifact_percent}')
+        print(f'Share of trials that were flagged as artifacts = {artifact_percent}')
         print(f'Label distribution: {np.unique(eeg_trial_labels, return_counts=True)}')
         return artifact_percent, eeg_trials, eeg_trial_labels

@@ -3,11 +3,11 @@ from scipy.signal import butter, resample, filtfilt
 from pyriemann.utils.base import invsqrtm
 try:
     # relative path needed if to be used as module
-    from .utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+    from .utils import (read_data_file_to_dict, decide_kind, 
                         read_config, generateLabelWithRotation, decideLabelWithRotation)
 except ImportError:
     # absolute path selected if to run as stand alone shared_utils
-    from utils import (read_data_file_to_dict, detect_artifact, decide_kind, 
+    from utils import (read_data_file_to_dict, decide_kind, 
                        read_config, generateLabelWithRotation, decideLabelWithRotation)
 
 class DataPreprocessor:
@@ -135,6 +135,9 @@ class DataPreprocessor:
             b, a = butter(order, [low, high], btype='band')
             y = filtfilt(b, a, data)
             return y
+
+        
+        #PICKUP WORK HERE CREATE FIR BANDPASS OPTION def fir_bandpass_filter(data, lowcut, highcut, )
         
         for electrode_ix in range(data.shape[1]):
             data[:, electrode_ix] = butter_bandpass_filter(data[:,electrode_ix], self.lowcut, self.highcut, self.sf, self.order)

@@ -1,27 +1,27 @@
 import sys
+import os
 import numpy as np
 from scipy import signal
 import ast
 import random
 import yaml
+import copy
 from collections import Counter
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
     from yaml import Loader, Dumper
 import pandas as pd
-import sqlite3
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
 
 
-def model_namer(sql_conn, train_on_server, model_arch_name):
+def model_namer(model_dir, model_arch_name):
     '''Generates a unique two word name based on the inbuilt unix dictionary. 
     
     Parameters
     ----------
-    sql_conn: sqlite3.Connection
-    train_on_server: bool
+    model_dir: string directory where model will be stored
     model_arch_name: string
         Name of the model architecture.
 
@@ -31,26 +31,22 @@ def model_namer(sql_conn, train_on_server, model_arch_name):
         Generated two-word model name with model architecture's name, e.g. wooden_jazz_EEGNet.
     '''
 
-    table = 'EEGNet'
     # get previously used names
-    if train_on_server == True:
-        used_names = pd.read_sql(f'SELECT * FROM {table}', sql_conn)
-        used_names = list(used_names.name)
+    existing_models = os.listdir(model_dir)
+    used_names = [model.split('_')[0] + '_' + model.split('_')[1] for model in existing_models]
     
     # import word list from unix install
     with open('/usr/share/dict/words') as f:
         words = f.read().splitlines()
     words = [word.lower() for word in words if "'" not in word]
     
-    if train_on_server == True:
-        unique_name = False
-        while not unique_name:
-            new_name = random.choice(words) + '_' + random.choice(words)
-            new_name = new_name + '_' + model_arch_name
-            if new_name not in used_names:
-                unique_name = True
-    else:                                                                   # cannot check duplicate names for local training
+    unique_name = False
+    while not unique_name:
         new_name = random.choice(words) + '_' + random.choice(words)
+        if new_name not in used_names:
+            unique_name = True
+
+    new_name = new_name + '_' + model_arch_name
 
     return new_name
 
@@ -183,25 +179,41 @@ def read_data_file_to_dict(filename, return_dict=True):
     return data_dict
 
 
-def detect_artifact(eeg_data,
-                    reject_std=5.5):
-    '''This function checks eeg data for artifacts. If any element in the data exceeds the standard deviation threshold, it returns True.
+class ArtifactTuner():
+    '''This object is designed to be called during online sessions in order to adjust the 
+    standard deviation threshold and hit a targeted percentage of ticks which will 
+    be identified as artifacts.'''
+    def __init__(self, config):
+        self.config = copy.deepcopy(config)
+        self.reject_std = self.config['reject_std']
+        self.apply_adjustment = self.config['tune_rejection_threshold']['apply']
+        self.ticks_till_adjustment = self.config['tune_rejection_threshold']['ticks_per_adjustment']
+        self.percentile_goal = 100 - self.config['tune_rejection_threshold']['share_of_ticks_to_reject']
+        self.std_dev_maxes = []
 
-    Note: This function expects to see data which is already normalized
+    def detect_artifact(self, eeg_data):
+        '''This function is designed to be called every tick. It should be passed the results of the 
+        artifact detector on this tick's data (i.e., either True or False for whether 
+        this tick's data was flagged as an artifact).
+        
+        This function expects to be passed windows of eeg_data that are already normalized'''
+        #Check if any element in the data array exceeds standard dev threshold
+        artifact = np.any(np.fabs(eeg_data) > self.reject_std)
+        #If adjusting threshold over time, do so
+        if self.apply_adjustment:
+            #Capture needed data to make threshold adjustment decision
+            self.ticks_till_adjustment -= 1
+            self.std_dev_maxes.append(np.max(eeg_data))
+            #If ticks to adjustment is full, adjust reject_std going forward
+            if self.ticks_till_adjustment == 0:
+                #Find rejection threshold that would have resulted in desired rejection percent and use going forward
+                maxes = np.array(self.std_dev_maxes)
+                self.reject_std = np.percentile(a=maxes, q=self.percentile_goal)
 
-    eeg data should be a window of eeg data.
-
-    reject_std is the number of standard deviations to allow each channel to vary by. If any data points in a window exceed 
-    this threshold, the window will be marked as containing an artifact.
-    
-    It returns True if an artifact is detected, otherwise False.
-    
-    '''
-    
-    #Check if any element in the data array exceeds standard dev threshold
-    bad_window = np.any(np.fabs(eeg_data) > reject_std)
-
-    return bad_window
+                #Reset for next period of adjustment
+                self.ticks_till_adjustment = copy.deepcopy(self.config['tune_rejection_threshold']['ticks_per_adjustment'])
+        #Return whether to flag this tick's data as an artifact
+        return artifact
 
 
 def generateLabelWithRotation(task, omitAngles=10):
