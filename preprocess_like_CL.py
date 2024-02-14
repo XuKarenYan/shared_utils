@@ -85,6 +85,10 @@ class PreprocessLikeClosedLoop:
         data_path = self.data_dir + self.data_name
         eeg_data = read_data_file_to_dict(data_path + "/eeg.bin")
         task_data = read_data_file_to_dict(data_path + "/task.bin")
+
+        #Set whether to use eegbuffersignal (unfiltered data). If not, uses buffersignal (already filtered by raspy) by default
+        use_eegbuffersignal = self.config.get('data_preprocessor', {}).get('use_eegbuffersignal', False)
+                
         
         #For closed loop experiments, generate label every ms of data
         if 'data_kinds' in self.config:
@@ -131,9 +135,12 @@ class PreprocessLikeClosedLoop:
             else:
                 #Extract the latency period that decoder would see closed loop
                 start_ix = end_ix - self.window_length
-                data = eeg_data['databuffer'][start_ix:end_ix, :]
+                if use_eegbuffersignal:
+                    data = eeg_data['eegbuffersignal'][start_ix:end_ix, :]
+                else:
+                    data = eeg_data['databuffer'][start_ix:end_ix, :]
 
-            #Drop channels and normalize the data
+            #Drop channels, filter, and normalize the data
             data = preprocessor.preprocess(data)
             
             #Create flag for whether artifact detected in this tick

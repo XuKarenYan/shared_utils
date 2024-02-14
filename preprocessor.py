@@ -4,11 +4,13 @@ from pyriemann.utils.base import invsqrtm
 try:
     # relative path needed if to be used as module
     from .utils import (read_data_file_to_dict, decide_kind, 
-                        read_config, generateLabelWithRotation, decideLabelWithRotation)
+                        read_config, generateLabelWithRotation, 
+                        decideLabelWithRotation, DataFilter)
 except ImportError:
     # absolute path selected if to run as stand alone shared_utils
     from utils import (read_data_file_to_dict, decide_kind, 
-                       read_config, generateLabelWithRotation, decideLabelWithRotation)
+                       read_config, generateLabelWithRotation, 
+                       decideLabelWithRotation, DataFilter)
 
 class DataPreprocessor:
     '''This preprocessor handles the general preprocessing work, including dropping channels, several filtering, and normalization.
@@ -33,14 +35,15 @@ class DataPreprocessor:
 
         self.eeg_cap_type = config['eeg_cap_type']
         self.ch_to_drop = config['ch_to_drop']
-        self.apply_bandpass = config['bandpass_filter']['apply']
-        self.lowcut = config['bandpass_filter']['lowcut']
-        self.highcut = config['bandpass_filter']['highcut']
-        self.order = config['bandpass_filter']['order']
+        self.apply_filter = config['data_filter']['apply']
+        self.lowpass = config['data_filter']['lowpass']
+        self.highpass = config['data_filter']['highpass']
+        self.order = config['data_filter']['order']
+        self.notch_frequencies = config['data_filter']['notch_frequencies']
+        self.notch_qualities = config['data_filter']['notch_qualities']
         self.sf = config['sampling_frequency']
         self.online_status = config['online_status']
         self.normalizer_type = config['closed_loop_settings']['normalizer_type']
-        self.zero_center = bool(config.get('zero_center', True)) # True if subtracting the mean of data 
         self.skip_samples = config['skip_samples']
         self.first_run = True
         self.zero_center = bool(config.get('zero_center', True)) # True if subtracting the mean of data. Only applies to offline and Welfords, NOT running_mean.
@@ -115,34 +118,6 @@ class DataPreprocessor:
         else:
             raise ValueError('eeg_cap_type must be one of "gel64", "dry64", "saline64".')
         return ch_names, coords
-
-    def bandpass_channels(self, data):
-        '''Apply butter bandpass filter. Both high pass band and low pass band can be assigned.
-
-        Parameters
-        ----------
-        data: 2-d array with shape (n_samples, n_electrodes)
-
-        Returns
-        -------
-        data: 2-d array with shape (n_samples, n_electrodes)
-        '''
-
-        def butter_bandpass_filter(data, lowcut, highcut, sf, order):
-            nyq = 0.5 * sf
-            low = lowcut / nyq
-            high = highcut / nyq
-            b, a = butter(order, [low, high], btype='band')
-            y = filtfilt(b, a, data)
-            return y
-
-        
-        #PICKUP WORK HERE CREATE FIR BANDPASS OPTION def fir_bandpass_filter(data, lowcut, highcut, )
-        
-        for electrode_ix in range(data.shape[1]):
-            data[:, electrode_ix] = butter_bandpass_filter(data[:,electrode_ix], self.lowcut, self.highcut, self.sf, self.order)
-
-        return data
 
     def laplacian_filtering(self, data):
         '''Apply laplacian filter to data with neighbor distance as 2 (next next one).
@@ -248,7 +223,7 @@ class DataPreprocessor:
         data = np.delete(data, ch_index_to_drop, axis=1)
         return data
 
-    def preprocess(self, data):
+    def preprocess(self, data, reset_filter=True):
         '''Manage the whole preprocessing procedure.
 
         Parameters
@@ -265,8 +240,14 @@ class DataPreprocessor:
         data = self.throw_channels(data)
 
         # Apply filters
-        if self.apply_bandpass:                     # bandpass filter
-            data = self.bandpass_channels(data)
+        if self.apply_filter:                     # lowpass, highpass, and notch filters
+            filterer = DataFilter(fn=self.notch_frequencies, 
+                                  q=self.notch_qualities, 
+                                  highpass=self.highpass, 
+                                  lowpass=self.lowpass, 
+                                  order=self.order, 
+                                  fs=self.sf)
+            data = filterer.filter_data(data, reset=reset_filter)
         data = self.laplacian_filtering(data)       # laplacian filter
 
         # Normalize channels

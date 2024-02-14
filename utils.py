@@ -198,20 +198,25 @@ class ArtifactTuner():
         
         This function expects to be passed windows of eeg_data that are already normalized'''
         #Check if any element in the data array exceeds standard dev threshold
-        artifact = np.any(np.fabs(eeg_data) > self.reject_std)
+        artifact = (np.max(np.fabs(eeg_data)) > self.reject_std)
+        #If not adjusting over time, return artifact decision and done
+        if not self.apply_adjustment:
+            return artifact
         #If adjusting threshold over time, do so
-        if self.apply_adjustment:
-            #Capture needed data to make threshold adjustment decision
+        else:
             self.ticks_till_adjustment -= 1
-            self.std_dev_maxes.append(np.max(eeg_data))
-            #If ticks to adjustment is full, adjust reject_std going forward
-            if self.ticks_till_adjustment == 0:
-                #Find rejection threshold that would have resulted in desired rejection percent and use going forward
-                maxes = np.array(self.std_dev_maxes)
-                self.reject_std = np.percentile(a=maxes, q=self.percentile_goal)
+            self.std_dev_maxes.append(np.max(np.fabs(eeg_data)))
 
-                #Reset for next period of adjustment
-                self.ticks_till_adjustment = copy.deepcopy(self.config['tune_rejection_threshold']['ticks_per_adjustment'])
+        #If time to make adjustment, do so
+        if self.ticks_till_adjustment == 0:
+            #Find rejection threshold that would have resulted in desired rejection percent and use going forward
+            maxes = np.array(self.std_dev_maxes)
+            self.reject_std = np.percentile(a=maxes, 
+                                            q=self.percentile_goal, 
+                                            method='lower')
+
+            #Reset for next period of adjustment
+            self.ticks_till_adjustment = copy.deepcopy(self.config['tune_rejection_threshold']['ticks_per_adjustment'])
         #Return whether to flag this tick's data as an artifact
         return artifact
 
@@ -345,3 +350,53 @@ def create_confusion_matrix(pred_labels,true_labels,file_name=None):
         plt.savefig(file_name)
 
     return fig
+
+
+class DataFilter():
+    def __init__(self, fn=[60, 120, 180, 60], q=[10, 5, 2, 4], highpass=4, lowpass=40, order=[5, 4], fs=1000.0):
+        self.fn = fn # notch filter frequencies
+        self.q = q # notch filter q factors
+        self.lowpass = lowpass # butterworth filter lowpass cutoff frequency (in Hz). Set to None to not apply.
+        self.highpass = highpass #butterworth highpass cutoff frequency (in Hz). Set to None to not apply.
+        self.order = order # butterworth filter order. Should be a list with first element the highpass order, second element the lowpass order. Orders should be ints
+        self.fs = fs # sampling frequency
+        
+        self.sosnotch = [np.concatenate(signal.iirnotch(fn_i, q_i, fs=fs)).reshape((1, 6)) for fn_i, q_i in zip(fn, q)]
+        #If no lowpass or highpass, just apply notch filters
+        if (not highpass) and (not lowpass):
+            self.sosbutter = np.zeros((0, 6))
+            self.sos = np.vstack([*self.sosnotch, self.sosbutter])
+        # If lowpass or highpass but not both, apply the relevant one
+        elif highpass and not lowpass:
+            wc = highpass/fs*2.0
+            self.sosbutter = signal.butter(order[0], wc, btype='highpass', output='sos')
+            self.sos = np.vstack([*self.sosnotch, self.sosbutter])
+        elif not highpass and lowpass:
+            wc = lowpass/fs*2.0
+            self.sosbutter = signal.butter(order[1], wc, btype='lowpass', output='sos')
+            self.sos = np.vstack([*self.sosnotch, self.sosbutter])
+        elif highpass and lowpass:
+            wc = [highpass/fs*2.0, lowpass/fs*2.0]
+            self.soshp = signal.butter(order[0], wc[0], btype='highpass', output='sos')
+            self.soslp = signal.butter(order[1], wc[1], btype='lowpass', output='sos')
+            self.sos = np.vstack([*self.sosnotch, self.soslp, self.soshp])
+        
+        self.zi0 = signal.sosfilt_zi(self.sos)
+        self.zi = None
+        return
+    def filter_data(self, data, reset=True):
+        # data should have shape (time, channels)
+        #Reset controls whether the object maintains the group correction (e.g., if you are running all data through in order, once each) vs if it should reset and evaluate each piece of data on a standalone basis
+        if reset:
+            self.zi = None
+        if data.ndim == 1:
+            if self.zi is None:
+                self.zi = self.zi0*data[0]
+            out, zo = signal.sosfilt(self.sos, data, zi=self.zi)
+            self.zi = zo
+        else:
+            if self.zi is None:
+                self.zi = (self.zi0[..., None]@data[0].reshape((1, -1)))
+            out, zo = signal.sosfilt(self.sos, data, axis=0, zi=self.zi)
+            self.zi = zo
+        return out
