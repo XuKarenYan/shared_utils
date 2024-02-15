@@ -56,6 +56,7 @@ class PreprocessLikeClosedLoop:
         self.labels_to_keep = config['data_preprocessor']['closed_loop_settings']['labels_to_keep']
         self.relabel_pairs = config['data_preprocessor']['closed_loop_settings']['relabel_pairs']
         self.detect_artifacts = config['artifact_handling']['detect_artifacts']
+        self.maintain_dir_on_artifact = config['artifact_handling']['maintain_direction_online']
         self.reject_std = config['artifact_handling']['reject_std']
         self.initial_ticks = config['data_preprocessor']['closed_loop_settings']['initial_ticks']
         self.resample_rate = int(config['augmentation']['new_sampling_frequency'] * self.window_length / 1000)
@@ -158,8 +159,10 @@ class PreprocessLikeClosedLoop:
             #If artifact detected, use most recently decoded data and label (to simulate cursor maintaining direction online when artifact detected)
             if artifact:
                 artifact_counter += 1
-                eeg_trials.append(eeg_trials[-1])
-                eeg_trial_labels.append(eeg_trial_labels[-1])
+                #If maintaining last direction on artifact, add previous label and prediction to output again. Otherwise, do nothing
+                if maintain_dir_on_artifact:
+                    eeg_trials.append(eeg_trials[-1])
+                    eeg_trial_labels.append(eeg_trial_labels[-1])
                 continue
             
             #Else no artifact; resample and get label

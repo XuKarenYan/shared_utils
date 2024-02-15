@@ -7,12 +7,14 @@ try:
     # relative path needed if to be used as module
     from .preprocessor import DataPreprocessor
     from .utils import (read_data_file_to_dict, ArtifactTuner, decide_kind, 
-                        read_config, generateLabelWithRotation, decideLabelWithRotation)
+                        read_config, generateLabelWithRotation, decideLabelWithRotation,
+                        DataFilter)
 except ImportError:
     # absolute path selected if to ran as stand alone shared_utils
     from preprocessor import DataPreprocessor
     from utils import (read_data_file_to_dict, ArtifactTuner, decide_kind, 
-                       read_config, generateLabelWithRotation, decideLabelWithRotation)
+                       read_config, generateLabelWithRotation, decideLabelWithRotation,
+                       DataFilter)
 
 
 class DatasetGenerator:
@@ -259,6 +261,9 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
     stride = config['augmentation']['stride']
     new_samp_freq = config['augmentation']['new_sampling_frequency']
     num_noise = config['augmentation']['num_noise']
+    noise_amplitude = config['augmentation']['noise_amplitude']
+    #Get whether to bandpass this noisy window. Default to False to match legacy behavior
+    bandpass_after_noise = config.get('augmentation', {}).get('bandpass_after_noise', False)
     detect_artifacts = config['artifact_handling']['detect_artifacts']
     reject_std = config['artifact_handling']['reject_std']
 
@@ -271,6 +276,14 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
 
     if detect_artifacts:
         artifact_detector = ArtifactTuner(config['artifact_handling'])
+
+    if bandpass_after_noise:
+        filterer = DataFilter(fn=config['data_preprocessor']['data_filter']['notch_frequencies'], 
+                              q=config['data_preprocessor']['data_filter']['notch_qualities'], 
+                              highpass=config['data_preprocessor']['data_filter']['highpass'], 
+                              lowpass=config['data_preprocessor']['data_filter']['lowpass'], 
+                              order=config['data_preprocessor']['data_filter']['order'], 
+                              fs=config['data_preprocessor']['sampling_frequency'])
     
     with h5py.File(h5_file, 'w') as file:
         for fold, ids in enumerate(ids_folds):
@@ -325,8 +338,11 @@ def augment_data_to_file(trials, labels, kinds, ids_folds, h5_file, config):
 
                     # generate noised data of this window and save
                     for j in range(num_noise):
-                        noise = np.max(trial_window) * np.random.uniform(-0.5, 0.5, trial_window.shape)
-                        trial_data.append(resample(trial_window + noise, window_size, axis=1))
+                        noise = np.max(trial_window) * np.random.uniform(-noise_amplitude, noise_amplitude, trial_window.shape)
+                        noisy_window = trial_window + noise
+                        if bandpass_after_noise:
+                            noisy_window = filterer.filter_data(noisy_window, reset=True)
+                        trial_data.append(resample(noisy_window, window_size, axis=1))
                         dist.append(new_label)
 
                     window_start += stride
