@@ -396,7 +396,7 @@ class DataFilter():
             self.zi = zo
         else:
             if self.zi is None:
-                self.zi = (self.zi0[..., None]@data[0].reshape((1, -1)))
+                self.zi = np.expand_dims(self.zi0[..., None]@data[0].reshape((1, -1)), 3)
             out, zo = signal.sosfilt(self.sos, data, axis=0, zi=self.zi)
             self.zi = zo
         return out

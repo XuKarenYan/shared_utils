@@ -160,7 +160,7 @@ class PreprocessLikeClosedLoop:
             if artifact:
                 artifact_counter += 1
                 #If maintaining last direction on artifact, add previous label and prediction to output again. Otherwise, do nothing
-                if maintain_dir_on_artifact:
+                if self.maintain_dir_on_artifact:
                     eeg_trials.append(eeg_trials[-1])
                     eeg_trial_labels.append(eeg_trial_labels[-1])
                 continue
